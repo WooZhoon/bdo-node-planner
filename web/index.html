@@ -1,0 +1,1550 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>노드 플래너</title>
+<style>
+:root {
+  --bg: #f6f5f2; --panel: #ffffff; --ink: #1d1d1b; --muted: #6b6a66; --line: #e3e1db;
+  --accent: #b5562b; --accent-soft: #f6e6dc; --ok: #2f7d4f; --ok-soft: #e1f1e6; --bad: #b3261e; --bad-soft: #f9e1df;
+  --owned: #2f6db5; --map-bg: #faf9f6; --map-edge: #d9d6ce; --map-node: #b9b5ab;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #151514; --panel: #1f1f1d; --ink: #ecebe6; --muted: #9b998f; --line: #34332f;
+    --accent: #e08455; --accent-soft: #3a2619; --ok: #6cc18f; --ok-soft: #1b3325; --bad: #f08a80; --bad-soft: #3d1d1a;
+    --owned: #7aa9e6; --map-bg: #1a1a18; --map-edge: #3a3934; --map-node: #5d5b54;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #151514; --panel: #1f1f1d; --ink: #ecebe6; --muted: #9b998f; --line: #34332f;
+  --accent: #e08455; --accent-soft: #3a2619; --ok: #6cc18f; --ok-soft: #1b3325; --bad: #f08a80; --bad-soft: #3d1d1a;
+  --owned: #7aa9e6; --map-bg: #1a1a18; --map-edge: #3a3934; --map-node: #5d5b54;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink);
+  font: 14px/1.5 "Pretendard", "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif; }
+header { padding: 18px 24px 8px; display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+header h1 { margin: 0; font-size: 20px; letter-spacing: -0.02em; }
+header p { margin: 0; color: var(--muted); font-size: 13px; }
+main { max-width: 1280px; margin: 0 auto; padding: 8px 24px 32px; }
+header { max-width: 1280px; margin: 0 auto; }
+@media (max-width: 900px) { main { padding: 8px 16px 24px; } header { padding: 16px 16px 4px; } }
+/* 세로로 쌓는 블럭: 헤더를 누르면 접힘 */
+.block { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; margin-top: 12px; }
+.bhead { display: flex; align-items: baseline; gap: 10px; padding: 14px 16px; cursor: pointer; user-select: none; }
+.bhead b { font-size: 15px; }
+.bhead small { color: var(--muted); font-size: 12px; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bhead .chev { color: var(--muted); transition: transform .15s; font-style: normal; margin-left: auto; }
+.block.collapsed .chev { transform: rotate(-90deg); }
+.block.collapsed .bbody { display: none; }
+.bbody { padding: 0 16px 16px; }
+.block .panel { background: transparent; }
+.cols2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.cols2 > .panel { margin-top: 0; }
+.cols3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px 20px; }
+@media (max-width: 1000px) { .cols3 { grid-template-columns: 1fr 1fr; } }
+@media (max-width: 760px) { .cols2, .cols3 { grid-template-columns: 1fr; } }
+.runbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 12px; }
+.runbar button.primary { width: auto; padding: 11px 36px; margin-left: auto; }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px; }
+.panel + .panel { margin-top: 12px; }
+.panel h2 { margin: 0 0 10px; font-size: 14px; display: flex; justify-content: space-between; align-items: center; }
+.panel h2 small { color: var(--muted); font-weight: 400; }
+input, select, button { font: inherit; color: inherit; }
+input[type=text], input[type=number], select {
+  width: 100%; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); }
+input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+button { cursor: pointer; border: 1px solid var(--line); background: var(--panel); border-radius: 8px; padding: 7px 12px; }
+button:hover { border-color: var(--accent); }
+button.primary { background: var(--accent); border-color: var(--accent); color: #fff; width: 100%; padding: 11px; font-weight: 600; font-size: 15px; }
+button.primary:disabled { opacity: .6; cursor: wait; }
+button.ghost { border: none; background: none; color: var(--muted); padding: 2px 6px; }
+button.ghost:hover { color: var(--bad); }
+button.link { border: none; background: none; color: var(--accent); padding: 0; font-size: 12px; }
+.search { position: relative; }
+.suggest { position: absolute; z-index: 10; left: 0; right: 0; top: calc(100% + 4px); background: var(--panel);
+  border: 1px solid var(--line); border-radius: 8px; max-height: 280px; overflow: auto; box-shadow: 0 8px 24px rgba(0,0,0,.12); }
+/* 이름은 위, 설명은 아래 줄 (설명이 길어도 이름이 세로로 찌그러지지 않게) */
+.suggest div { padding: 7px 10px; cursor: pointer; }
+.suggest div span { display: block; overflow-wrap: anywhere; }
+.suggest div:hover, .suggest div.active { background: var(--accent-soft); }
+.suggest small { display: block; color: var(--muted); font-size: 11px; line-height: 1.35; }
+.card { border: 1px solid var(--line); border-radius: 10px; padding: 10px; margin-top: 8px; }
+.card-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.card-head b { font-size: 14px; }
+.tag { font-size: 11px; padding: 1px 7px; border-radius: 99px; background: var(--accent-soft); color: var(--accent); }
+.row { display: flex; gap: 8px; align-items: center; margin-top: 8px; }
+.row label { color: var(--muted); font-size: 12px; white-space: nowrap; }
+.row input[type=number] { width: 90px; }
+.row button { white-space: nowrap; flex: none; }
+.row select { min-width: 0; }
+.mats { color: var(--muted); font-size: 12px; margin-top: 6px; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.chip { display: inline-flex; align-items: center; gap: 4px; padding: 3px 4px 3px 10px; border-radius: 99px;
+  background: var(--bg); border: 1px solid var(--line); font-size: 12px; }
+.chip button { border: none; background: none; padding: 0 4px; color: var(--muted); }
+.field { margin-top: 10px; }
+.field > label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+.hint { color: var(--muted); font-size: 12px; margin: 6px 0 0; }
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; }
+@media (max-width: 560px) { .stats { grid-template-columns: repeat(2, 1fr); } }
+.stat { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; }
+.stat span { display: block; color: var(--muted); font-size: 12px; }
+.stat b { font-size: 24px; letter-spacing: -0.02em; }
+.stat.main b { color: var(--accent); }
+.status { margin-top: 8px; font-size: 12px; color: var(--muted); }
+.tbar { height: 4px; border-radius: 2px; background: var(--line); overflow: hidden; }
+.tbar i { display: block; height: 100%; width: 0; background: var(--accent); transition: width 1s linear; }
+.quality { margin-top: 12px; padding: 12px 14px; border-radius: 12px; border: 1px solid var(--line); background: var(--panel); display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+.quality b { font-size: 15px; }
+.quality p { margin: 2px 0 0; font-size: 12px; color: var(--muted); }
+.quality button { width: auto; margin-left: auto; }
+.mapwrap { position: relative; border-radius: 10px; overflow: hidden; background: var(--map-bg); border: 1px solid var(--line); }
+#map { display: block; width: 100%; height: 460px; cursor: grab; touch-action: none; }
+#map:active { cursor: grabbing; }
+.map-tools { position: absolute; right: 8px; top: 8px; display: flex; gap: 6px; }
+.map-tools button { background: var(--panel); font-size: 12px; padding: 4px 8px; }
+/* 전체 화면 지도: 지도 상자를 화면 전체로 띄우고 뒤는 어둡게 */
+/* 계산 중: 마을에서 연결선을 따라 빛이 퍼져 나감 (선마다 시작 시간을 연결 단계만큼 늦춤) */
+@keyframes pulseLine { 0% { stroke-opacity: 0; } 3% { stroke-opacity: 1; } 14% { stroke-opacity: 0; } 100% { stroke-opacity: 0; } }
+@keyframes pulseNode { 0% { fill-opacity: 0; } 3% { fill-opacity: 1; } 14% { fill-opacity: 0; } 100% { fill-opacity: 0; } }
+.pulse line { stroke: var(--accent); stroke-opacity: 0; animation: pulseLine var(--cycle) linear infinite; }
+.pulse circle { fill: var(--accent); fill-opacity: 0; animation: pulseNode var(--cycle) linear infinite; }
+.map-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.6); z-index: 50; }
+.mapwrap.full { position: fixed; inset: 24px; z-index: 51; box-shadow: 0 20px 60px rgba(0,0,0,.4); }
+.mapwrap.full #map { height: 100%; }
+@media (max-width: 760px) { .mapwrap.full { inset: 0; border-radius: 0; } }
+.legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 12px; color: var(--muted); margin-top: 8px; }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 4px; vertical-align: -1px; }
+table { width: 100%; border-collapse: collapse; }
+th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { font-size: 12px; color: var(--muted); font-weight: 500; }
+td small { color: var(--muted); }
+tr.done td:not(:first-child) { opacity: .5; text-decoration: line-through; }
+td.chk, th.chk { width: 28px; text-align: center; }
+td.chk input, th.chk input { width: 16px; height: 16px; cursor: pointer; }
+tr.grp td { background: var(--accent-soft, rgba(127,127,127,.08)); font-weight: 700; font-size: 13px; padding: 6px; }
+.tablewrap { overflow-x: auto; }
+.bar { height: 6px; border-radius: 99px; background: var(--line); margin-top: 4px; overflow: hidden; }
+.bar i { display: block; height: 100%; background: var(--ok); }
+.bar.bad i { background: var(--bad); }
+.slot { padding: 8px 0; border-bottom: 1px solid var(--line); }
+.slot:last-child { border-bottom: none; }
+.slot-head { display: flex; justify-content: space-between; gap: 8px; }
+.slot-head .bad { color: var(--bad); font-weight: 600; }
+.slot-items { color: var(--muted); font-size: 12px; }
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 12px; }
+.grid2 > .panel { margin-top: 0; }
+.grid2 + .panel { margin-top: 12px; }
+@media (max-width: 1100px) { .grid2 { grid-template-columns: 1fr; } }
+.nodelist { display: flex; flex-wrap: wrap; gap: 6px; }
+.chain { font-size: 12px; color: var(--muted); white-space: pre-wrap; margin: 4px 0 0; }
+.empty { color: var(--muted); text-align: center; padding: 48px 16px; }
+.error { color: var(--bad); background: var(--bad-soft); border-radius: 8px; padding: 10px; margin-top: 10px; }
+details summary { cursor: pointer; font-weight: 600; font-size: 14px; }
+.theme { margin-left: auto; }
+/* 탭: 위에 붙어 있는 탭 줄, 한 번에 블럭 하나만 보임 */
+.tabs { position: sticky; top: 0; z-index: 20; background: var(--bg); display: flex; gap: 4px; align-items: center;
+  padding: 8px 0; border-bottom: 1px solid var(--line); overflow-x: auto; scrollbar-width: thin; }
+.tabs button.tab { border: none; background: none; border-radius: 8px; padding: 8px 12px; white-space: nowrap; color: var(--muted); font-weight: 600; }
+.tabs button.tab:hover { color: var(--ink); background: var(--panel); }
+.tabs button.tab.active { color: var(--accent); background: var(--accent-soft); }
+.tabs button.tab .badge { display: inline-block; min-width: 18px; margin-left: 4px; padding: 0 6px; border-radius: 99px; font-size: 11px;
+  background: var(--bad); color: #fff; font-weight: 600; }
+.tabs button.tab .badge:empty { display: none; }
+.tabs .tabrun { margin-left: auto; width: auto; padding: 7px 18px; font-size: 14px; flex: none; }
+main.tabbed .block { display: none; }
+main.tabbed .block.active { display: block; }
+main.tabbed .bhead { cursor: default; }
+main.tabbed .bhead .chev { display: none; }
+main.tabbed .block.collapsed .bbody { display: block; }
+/* 맨 위로 (스크롤하면 나타남) */
+.fab { position: fixed; right: 20px; bottom: 20px; z-index: 30; width: 46px; height: 46px; border-radius: 50%; padding: 0;
+  font-size: 18px; background: var(--accent); border-color: var(--accent); color: #fff; box-shadow: 0 6px 18px rgba(0,0,0,.25);
+  opacity: 0; pointer-events: none; transition: opacity .15s; }
+.fab.show { opacity: 1; pointer-events: auto; }
+@media (max-width: 760px) { .fab { right: 14px; bottom: 14px; } }
+/* 노드 종류별 묶음 */
+.sets { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; }
+.set { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; }
+.set h3 { margin: 0 0 6px; font-size: 14px; display: flex; justify-content: space-between; }
+.set h3 small { color: var(--muted); font-weight: 400; }
+.set ul { margin: 0; padding: 0; list-style: none; font-size: 13px; }
+.set li { display: flex; justify-content: space-between; gap: 8px; padding: 2px 0; }
+.set li b { font-variant-numeric: tabular-nums; }
+.set li.need span { color: var(--accent); font-weight: 600; }
+.set li.extra { color: var(--muted); }
+.set li.extra b { font-weight: 400; }
+.jump { position: sticky; top: 57px; z-index: 5; background: var(--panel); padding: 8px 0; display: flex; gap: 6px; overflow-x: auto; scrollbar-width: thin; }
+.jump a { flex: none; white-space: nowrap; font-size: 12px; padding: 3px 10px; border-radius: 99px; border: 1px solid var(--line); color: var(--ink); text-decoration: none; }
+.jump a:hover { border-color: var(--accent); color: var(--accent); }
+/* 하위 재료 트리 */
+.tree td { padding: 4px 6px; font-size: 13px; }
+.tree td.q { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.tree tr.leaf td:first-child { color: var(--ink); }
+.tree tr:not(.leaf) td:first-child { font-weight: 600; }
+.how { font-size: 11px; padding: 0 6px; border-radius: 99px; border: 1px solid var(--line); color: var(--muted); white-space: nowrap; }
+.how.node { border-color: var(--ok); color: var(--ok); }
+</style>
+</head>
+<body>
+<header>
+  <h1>검은사막 노드 플래너</h1>
+  <p>만들 것을 고르면 공헌도 예산 안에서 최대한 많이 만들 수 있는 노드·경로·숙소를 계산합니다</p>
+  <button class="ghost theme" id="themeBtn" title="테마 전환">◐</button>
+</header>
+<main class="tabbed">
+  <nav class="tabs" id="tabs">
+    <button class="tab" data-tab="blk-input">만들 것<span class="badge" id="bdInput"></span></button>
+    <button class="tab" data-tab="blk-settings">설정</button>
+    <button class="tab" data-tab="blk-summary">요약 · 지도</button>
+    <button class="tab" data-tab="blk-work">일꾼 · 노드 · 집</button>
+    <button class="tab" data-tab="blk-mats">재료<span class="badge" id="bdMats" title="부족한 재료"></span></button>
+    <button class="tab" data-tab="blk-recipe">레시피 전개</button>
+    <button class="primary tabrun" id="tabRun" title="Ctrl+Enter">계산하기</button>
+  </nav>
+  <section class="block" id="blk-input">
+    <div class="bhead"><b>만들 것</b><small id="inputSummary"></small><i class="chev">▾</i></div>
+    <div class="bbody">
+      <div class="cols2">
+        <div class="panel">
+      <h2>완성품 <small id="recipeCount"></small></h2>
+      <div class="search">
+        <input type="text" id="recipeSearch" placeholder="예: 맥주, 새고기 튀김, 비약…" autocomplete="off">
+        <div class="suggest" id="recipeSuggest" hidden></div>
+      </div>
+      <div id="productList"></div>
+            </div>
+        <div class="panel">
+      <h2>재료 직접 입력 <small>레시피에 없을 때</small></h2>
+      <div class="search">
+        <input type="text" id="matSearch" placeholder="원재료·가루·반죽 이름" autocomplete="off">
+        <div class="suggest" id="matSuggest" hidden></div>
+      </div>
+      <div id="matList"></div>
+            </div>
+      </div>
+      <div class="runbar">
+        <label for="days" style="color:var(--muted);font-size:12px">기본 기간</label>
+        <input type="number" id="days" min="1" value="1" style="width:80px"><label style="color:var(--muted);font-size:12px">일</label>
+        <span class="hint" style="margin:0" id="daysHint"></span>
+        <button class="primary" id="runBtn">계산하기</button>
+      </div>
+      <div id="runError"></div>
+    </div>
+  </section>
+
+  <section class="block" id="blk-settings">
+    <div class="bhead"><b>설정</b><small id="settingsSummary"></small><i class="chev">▾</i></div>
+    <div class="bbody">
+      <div class="cols3">
+        <div class="field">
+          <label>공헌도 예산 (총 공헌도를 비우면 제한 없음)</label>
+          <div class="row" style="margin-top:0">
+            <label for="cpTotal">총</label><input type="number" id="cpTotal" min="0" placeholder="총 공헌도" style="width:110px">
+            <label for="cpRent">장비 대여</label><input type="number" id="cpRent" min="0" placeholder="0" style="width:80px">
+            <label for="cpOther">기타 소모</label><input type="number" id="cpOther" min="0" placeholder="0" style="width:80px">
+          </div>
+          <div id="cpBreakdown" class="hint"></div>
+        </div>
+        <div class="field">
+          <label for="goal">계산 목표</label>
+          <select id="goal" style="width:auto">
+            <option value="max">생산량 최대 (예산 안에서 최대한 많이)</option>
+            <option value="min">공헌도 최소 (입력한 수량만 딱)</option>
+          </select>
+          <p class="hint" style="margin:4px 0 0">생산량 최대: 입력한 수량은 최소치, 남는 공헌도로 필수 항목을 같은 비율로 늘립니다. 총 공헌도를 넣어야 적용됩니다.</p>
+        </div>
+        <div class="field">
+          <label>이미 투자한 노드 (0 공헌도로 계산)</label>
+          <div class="search">
+            <input type="text" id="ownedSearch" placeholder="노드 이름 검색" autocomplete="off">
+            <div class="suggest" id="ownedSuggest" hidden></div>
+          </div>
+          <div class="chips" id="ownedChips"></div>
+        </div>
+        <div class="field">
+          <label>이미 가진 집 (0 공헌도로 계산, 숙소·창고 용도는 계산이 정함)</label>
+          <div class="search">
+            <input type="text" id="houseSearch" placeholder="예: 벨리아 1번지, 하이델 4-1" autocomplete="off">
+            <div class="suggest" id="houseSuggest" hidden></div>
+          </div>
+          <div class="chips" id="houseChips"></div>
+        </div>
+        <div class="field">
+          <label>재료 조달 방법 (노드 / 구매 / 재배 / 따로 모음)</label>
+          <p class="hint" style="margin:0">계산 결과의 재료 옆에서 바꿀 수 있습니다. 상점 판매는 코덱스와 직접 알려준 목록으로 자동 판단합니다.</p>
+          <div id="srcInfo" class="hint"></div>
+        </div>
+        <div class="field">
+          <label for="resourcePct">지역 자원량 (%)</label>
+          <input type="number" id="resourcePct" min="0" max="100" value="0" style="width:90px">
+          <p class="hint" style="margin:4px 0 0">실제 작업량 = 기본 × (2 − 자원량). 0%면 작업량 2배로 넉넉하게(기본). 게임에서 보이는 자원량이 높으면 올리세요.</p>
+        </div>
+        <div class="field">
+          <label for="imperialWorkers">황실 공방 일꾼 (육조거리, 0~8명)</label>
+          <input type="number" id="imperialWorkers" min="0" max="8" value="4" style="width:90px">
+          <p class="hint" style="margin:4px 0 0">육조거리에서만 보낼 수 있어서 육조거리 숙소를 잡아둡니다 (창고 효율 6↑ 집 빼면 최대 8명).</p>
+        </div>
+        <div class="field">
+          <label for="extraWorkers">추가 일꾼 (농사용 등, 지역 무관)</label>
+          <input type="number" id="extraWorkers" min="0" value="0" style="width:90px">
+          <p class="hint" style="margin:4px 0 0">숙소 자리만 잡아줍니다. 마을 기본 침대(마을당 1)가 비어 있다고 보고 계산하니, 이미 다른 일꾼이 쓰고 있으면 '마을별 추가 숙소'로 조정하세요.</p>
+        </div>
+        <div class="field">
+          <label for="lodgeEff">창고 효율 n 이상인 집은 숙소로 안 씀</label>
+          <input type="number" id="lodgeEff" min="0" step="0.5" placeholder="비우면 적용 안 함" style="width:140px">
+          <p class="hint" style="margin:4px 0 0">기본 6: 아침의 나라·신규 지역의 창고 좋은 집 46채 (시트에 '숙소'라고 적혀 있어도 창고 우선)</p>
+          <p class="hint" style="margin:4px 0 0">효율 = 선행 집 포함 창고 칸 ÷ 공헌도 (집 가이드 시트 값 우선). 이 값 이상인 집은 창고용으로 아껴두고 창고로만 씁니다.</p>
+        </div>
+        <div class="field">
+          <label for="workerKinds">일꾼 종류</label>
+          <select id="workerKinds">
+            <option value="auto">자동 (노드마다 하루 생산량이 가장 많은 일꾼)</option>
+            <option value="goblin">고블린만</option>
+            <option value="giant">거인만</option>
+            <option value="goblin,giant">고블린 + 거인</option>
+          </select>
+        </div>
+        <div class="field">
+          <label><input type="checkbox" id="storageOn"> 창고 칸도 계산 (마을 기본 16칸, 아이템 종류 + 은화 1칸)</label>
+          <label><input type="checkbox" id="valuePack"> 가치 패키지 사용 중 (기본 창고 +16칸)</label>
+        </div>
+        <div class="field">
+          <label>마을별 추가 숙소 (펄 상점 등)</label>
+          <div class="row" style="margin-top:0">
+            <select id="bedTown"></select>
+            <input type="number" id="bedCount" min="1" value="1" style="width:70px">
+            <button id="bedAdd">추가</button>
+          </div>
+          <div class="chips" id="bedChips"></div>
+        </div>
+        <div class="field">
+          <label for="timeLimit">계산 시간 제한(초)</label>
+          <div class="row" style="margin-top:0;flex-wrap:wrap">
+            <input type="number" id="timeLimit" min="5" value="60" style="width:90px">
+            <span class="chips" id="timePresets" style="margin:0"></span>
+          </div>
+          <p class="hint" id="timeHint"></p>
+        </div>
+      </div>
+      <div class="panel" style="margin-top:12px">
+      <details id="editor">
+        <summary>조합식 직접 추가 <small style="font-weight:400;color:var(--muted)">코덱스에 없거나 다를 때</small></summary>
+        <div class="field">
+          <label>만들 아이템</label>
+          <div class="search">
+            <input type="text" id="edProductSearch" placeholder="아이템 이름 검색" autocomplete="off">
+            <div class="suggest" id="edProductSuggest" hidden></div>
+          </div>
+          <div id="edProduct" class="hint"></div>
+        </div>
+        <div class="row">
+          <label>방식</label>
+          <select id="edMethod" style="width:auto"></select>
+          <label>1회 결과</label><input type="number" id="edOut" min="0.1" step="0.1" value="1" style="width:70px"><label>개</label>
+        </div>
+        <div class="field">
+          <label>재료</label>
+          <div class="search">
+            <input type="text" id="edInputSearch" placeholder="재료 이름 검색" autocomplete="off">
+            <div class="suggest" id="edInputSuggest" hidden></div>
+          </div>
+          <div id="edInputs"></div>
+        </div>
+        <div class="row"><button id="edSave">저장</button><button id="edClear">비우기</button><span id="edMsg" class="hint" style="margin:0"></span></div>
+        <p class="hint">저장하면 코덱스 조합식보다 우선합니다. 1회 결과는 가공 1번에 나오는 평균 개수입니다.</p>
+        <div id="edList"></div>
+      </details>
+      </div>
+    </div>
+  </section>
+
+  <section class="block" id="blk-summary">
+    <div class="bhead"><b>요약 · 지도</b><small id="sumSummary"></small><i class="chev">▾</i></div>
+    <div class="bbody" id="resSummary"><div class="empty">완성품이나 재료를 추가하고 <b>계산하기</b>를 누르세요.</div></div>
+  </section>
+
+  <section class="block" id="blk-work">
+    <div class="bhead"><b>일꾼 · 노드 · 집</b><small id="workSummary"></small><i class="chev">▾</i></div>
+    <div class="bbody" id="resWork"><div class="empty">계산 결과가 여기에 나옵니다.</div></div>
+  </section>
+
+  <section class="block" id="blk-mats">
+    <div class="bhead"><b>재료</b><small id="matsSummary"></small><i class="chev">▾</i></div>
+    <div class="bbody" id="resMats"><div class="empty">계산 결과가 여기에 나옵니다.</div></div>
+  </section>
+
+  <section class="block" id="blk-recipe">
+    <div class="bhead"><b>레시피 전개</b><small id="recipeSummary">완성품마다 하위 재료 전체 수량</small><i class="chev">▾</i></div>
+    <div class="bbody" id="resRecipe"><div class="empty">계산 결과가 여기에 나옵니다.</div></div>
+  </section>
+</main>
+<button class="fab" id="toTop" title="맨 위로" aria-label="맨 위로">↑</button>
+
+<script>
+const $ = s => document.querySelector(s);
+const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const covered = (got, need) => got >= need * 0.995 - 1e-6;  // 소수점 필요량 반올림 오차 허용
+const fmt = n => (n > 0 && n < 10 && Math.round(n) !== n) ? (+n.toFixed(n < 1 ? 3 : 1)).toLocaleString('ko-KR') : Math.round(n).toLocaleString('ko-KR');
+let META = null, LAST = null;
+// 서버 호출: 로컬 서버(server.py)면 fetch, 정적 사이트(site/)면 bridge.js 가 넣어 준 PLANNER_API (브라우저 안에서 파이썬 계산)
+const STATIC = !!window.PLANNER_API;
+const API = window.PLANNER_API || {
+  async call(method, path, body) {
+    const res = await fetch(path, body === undefined ? { method } : { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    return { ok: res.ok, status: res.status, data: await res.json() };
+  },
+};
+const apiGet = async path => (await API.call('GET', path)).data;
+const NO_ENGINE = STATIC ? '계산 엔진을 불러오지 못했습니다. 새로고침해 보세요.' : '서버(server.py)가 실행 중인지 확인하세요.';
+const S = loadState();
+
+function loadState() {
+  const def = { products: [], materials: [], owned: [], owned_houses: [], beds: {}, budget: '', time: 60, days: 1,
+    storage: true, value_pack: false, workers: 'auto', sourcing: {}, resource_pct: 0, collapsed: {}, house_checks: {}, goal: 'max', lodge_eff_min: 6, extra_workers: 0, imperial_workers: 4, theme: '' };
+  let st;
+  try { st = Object.assign(def, JSON.parse(localStorage.getItem('bdo-planner') || '{}')); } catch { st = def; }
+  // 사용자 결정(창고 우선): 창고 효율 6 이상은 숙소로 안 씀 — 이미 저장된 설정에도 한 번만 적용
+  if (!st.eff6_applied) { st.lodge_eff_min = 6; st.eff6_applied = true; }
+  if (st.cp_total === undefined) { st.cp_total = st.budget ?? ''; st.cp_rent = ''; st.cp_other = ''; }
+  return st;
+}
+function save() { try { localStorage.setItem('bdo-planner', JSON.stringify(S)); } catch {} }
+
+// ---------- 탭 (사용자 요청: 세로로 길게 쌓는 대신 탭, 마지막 탭 기억) ----------
+function showTab(id, scroll = true) {
+  if (!document.getElementById(id)) id = 'blk-input';
+  document.querySelectorAll('main .block').forEach(b => b.classList.toggle('active', b.id === id));
+  document.querySelectorAll('.tabs .tab').forEach(t => t.classList.toggle('active', t.dataset.tab === id));
+  S.tab = id; save();
+  if (id === 'blk-summary' && VIEW) setView(VIEW);  // 숨어 있던 지도 크기 다시 맞춤
+  if (scroll && window.scrollY > $('#tabs').offsetTop) window.scrollTo({ top: $('#tabs').offsetTop });
+}
+document.querySelectorAll('.tabs .tab').forEach(t => t.onclick = () => showTab(t.dataset.tab));
+// 맨 위로 버튼
+addEventListener('scroll', () => $('#toTop').classList.toggle('show', scrollY > 300), { passive: true });
+$('#toTop').onclick = () => scrollTo({ top: 0, behavior: 'smooth' });
+// 어느 탭에서든 계산: 탭 줄 버튼 / Ctrl+Enter
+$('#tabRun').onclick = () => $('#runBtn').click();
+addEventListener('keydown', e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); $('#runBtn').click(); } });
+
+// ---------- 테마 ----------
+function applyTheme() { if (S.theme) document.documentElement.dataset.theme = S.theme; else delete document.documentElement.dataset.theme; }
+$('#themeBtn').onclick = () => {
+  const dark = S.theme ? S.theme === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
+  S.theme = dark ? 'light' : 'dark'; save(); applyTheme();
+};
+applyTheme();
+
+// ---------- 검색 상자 공통 ----------
+function attachSearch(input, box, source, onPick) {
+  let items = [], idx = -1;
+  const close = () => { box.hidden = true; idx = -1; };
+  let token = 0;
+  const render = async () => {
+    const q = input.value.trim();
+    if (!q) return close();
+    const my = ++token;
+    const got = await source(q);
+    if (my !== token) return;  // 더 최근 입력이 있으면 버림
+    items = got.slice(0, 30);
+    box.innerHTML = items.length ? items.map((it, i) =>
+      `<div data-i="${i}" class="${i === idx ? 'active' : ''}"><span>${esc(it.label)}</span><small>${esc(it.sub || '')}</small></div>`).join('')
+      : '<div><small>결과 없음</small></div>';
+    box.hidden = false;
+  };
+  let timer = null;
+  input.addEventListener('input', () => { idx = -1; clearTimeout(timer); timer = setTimeout(render, 120); });
+  input.addEventListener('keydown', e => {
+    if (box.hidden) return;
+    const mark = () => box.querySelectorAll('[data-i]').forEach(el => el.classList.toggle('active', +el.dataset.i === idx));
+    if (e.key === 'ArrowDown') { idx = Math.min(idx + 1, items.length - 1); mark(); e.preventDefault(); }
+    if (e.key === 'ArrowUp') { idx = Math.max(idx - 1, 0); mark(); e.preventDefault(); }
+    if (e.key === 'Enter' && items.length) { pick(items[Math.max(idx, 0)]); e.preventDefault(); }
+    if (e.key === 'Escape') close();
+  });
+  box.addEventListener('mousedown', e => {
+    const d = e.target.closest('[data-i]'); if (d) { pick(items[+d.dataset.i]); e.preventDefault(); }
+  });
+  input.addEventListener('blur', () => setTimeout(close, 100));
+  function pick(it) { onPick(it); input.value = ''; close(); }
+}
+const match = (name, q) => name.toLowerCase().includes(q.toLowerCase());
+// 코덱스 전체 아이템 검색
+async function searchItems(q) {
+  if (q.length < 2) return [];
+  try { return await apiGet('/api/items?q=' + encodeURIComponent(q)); } catch { return []; }
+}
+const howLabel = how => how || '조합식 없음 (계산 때 코덱스에서 찾아봄)';
+
+const prioSel = (kind, i, v) => `<select class="prio" data-i="${i}" style="width:auto;padding:4px 6px" title="필수: 꼭 채움 / 여유: 남는 공헌도·일꾼으로 되는 만큼">
+  <option value="must" ${v !== 'nice' ? 'selected' : ''}>필수</option><option value="nice" ${v === 'nice' ? 'selected' : ''}>여유</option></select>`;
+const qtyWord = w => S.days > 1 ? `${S.days}일 동안 ${w}` : `하루 ${w}`;
+function renderDays() {
+  $('#days').value = S.days;
+  $('#daysHint').textContent = '새로 추가하는 항목의 기간 (항목마다 따로 바꿀 수 있음)';
+}
+$('#days').onchange = e => { S.days = Math.max(1, Math.round(+e.target.value) || 1); save(); renderDays(); renderProducts(); renderMaterials(); };
+
+// ---------- 완성품 ----------
+function renderInputSummary() {
+  const n = S.products.length + S.materials.length;
+  $('#inputSummary').textContent = n ? `완성품 ${S.products.length} · 재료 ${S.materials.length}` : '';
+}
+function renderProducts() {
+  renderInputSummary();
+  const byPid = Object.fromEntries(META.recipes.map(r => [r.pid, r]));
+  $('#productList').innerHTML = S.products.map((p, i) => {
+    const r = byPid[p.pid]; if (!r) return '';
+    const v = r.variants[p.variant] || r.variants[0];
+    const opts = r.variants.length > 1
+      ? `<div class="row"><label>조합</label><select data-i="${i}" class="pVariant">${r.variants.map((vv, j) =>
+          `<option value="${j}" ${j === p.variant ? 'selected' : ''}>${j + 1}. ${esc(vv.map(m => m.label + ' ' + m.qty).join(', '))}</option>`).join('')}</select></div>`
+      : '';
+    return `<div class="card">
+      <div class="card-head"><b>${esc(r.name)} <span class="tag">${esc(r.kind)}</span></b><button class="ghost pDel" data-i="${i}" title="삭제">✕</button></div>
+      <div class="row"><input type="number" min="1" value="${p.crafts}" class="pCrafts" data-i="${i}" style="width:80px"><label>회 /</label>
+        <input type="number" min="1" value="${p.days || S.days}" class="pDays" data-i="${i}" style="width:60px"><label>일</label>${prioSel('p', i, p.priority)}</div>
+      ${opts}
+      <div class="mats">${esc(v.map(m => `${m.label} ×${m.qty}${m.alt ? '' : ''}`).join(' + '))}</div>
+    </div>`;
+  }).join('');
+}
+$('#productList').addEventListener('change', e => {
+  const i = +e.target.dataset.i;
+  if (e.target.classList.contains('pCrafts')) S.products[i].crafts = Math.max(1, +e.target.value || 1);
+  if (e.target.classList.contains('pDays')) S.products[i].days = Math.max(1, Math.round(+e.target.value) || 1);
+  if (e.target.classList.contains('prio')) S.products[i].priority = e.target.value;
+  if (e.target.classList.contains('pVariant')) S.products[i].variant = +e.target.value;
+  save(); renderProducts();
+});
+$('#productList').addEventListener('click', e => {
+  if (e.target.classList.contains('pDel')) { S.products.splice(+e.target.dataset.i, 1); save(); renderProducts(); }
+});
+
+// ---------- 재료 직접 입력 ----------
+function renderMaterials() {
+  renderInputSummary();
+  const name = Object.fromEntries(META.manual_items.map(m => [m.id, m.name]));
+  $('#matList').innerHTML = S.materials.map((m, i) => `<div class="card">
+    <div class="card-head"><b>${esc(m.name || name[m.id] || m.id)}</b><button class="ghost mDel" data-i="${i}">✕</button></div>
+    <div class="row"><input type="number" min="1" value="${m.qty}" class="mQty" data-i="${i}" style="width:80px"><label>개 /</label>
+      <input type="number" min="1" value="${m.days || S.days}" class="mDays" data-i="${i}" style="width:60px"><label>일</label>${prioSel('m', i, m.priority)}</div>
+  </div>`).join('');
+}
+$('#matList').addEventListener('change', e => {
+  const i = +e.target.dataset.i;
+  if (e.target.classList.contains('mQty')) { S.materials[i].qty = Math.max(1, +e.target.value || 1); save(); }
+  if (e.target.classList.contains('mDays')) { S.materials[i].days = Math.max(1, Math.round(+e.target.value) || 1); save(); }
+  if (e.target.classList.contains('prio')) { S.materials[i].priority = e.target.value; save(); }
+});
+$('#matList').addEventListener('click', e => {
+  if (e.target.classList.contains('mDel')) { S.materials.splice(+e.target.dataset.i, 1); save(); renderMaterials(); }
+});
+
+// ---------- 설정 ----------
+const nodeByKey = () => Object.fromEntries(META.map.nodes.map(n => [n.k, n]));
+function ownedCp() {
+  const nb = nodeByKey(), hb = Object.fromEntries(META.houses.map(h => [h.k, h]));
+  return S.owned.reduce((a, k) => a + (nb[k]?.cp || 0), 0) + S.owned_houses.reduce((a, k) => a + (hb[k]?.cp || 0), 0);
+}
+function reservedHouses() {
+  // 창고 효율 기준 이상인 집 + 그 집의 선행 집 (이미 가진 집 제외) = 창고용으로 미리 살 집
+  if (S.lodge_eff_min === '' || S.lodge_eff_min === undefined) return [];
+  const hb = Object.fromEntries(META.houses.map(h => [h.k, h])), owned = new Set(S.owned_houses), out = new Set();
+  META.houses.forEach(h => {
+    if (h.eff < S.lodge_eff_min) return;
+    let cur = h.k;
+    while (cur && hb[cur] && !out.has(cur)) { if (!owned.has(cur)) out.add(cur); cur = hb[cur].need; }
+  });
+  return [...out];
+}
+function budgetCalc() {
+  // 총 공헌도 − 장비 대여 = 창고·숙소·노드 연결용 → 기타 소모, 이미 쓰고 있는 보유 노드·집 공헌도를 빼면 이번에 새로 쓸 수 있는 양
+  if (S.cp_total === '' || S.cp_total === undefined) return null;
+  const rent = +S.cp_rent || 0, other = +S.cp_other || 0, own = ownedCp();
+  const hb = Object.fromEntries(META.houses.map(h => [h.k, h])), res = reservedHouses();
+  const store = res.reduce((a, k) => a + (hb[k]?.cp || 0), 0);
+  const infra = S.cp_total - rent;
+  return { total: +S.cp_total, rent, infra, other, own, store, storeN: res.length, avail: Math.max(0, infra - other - own - store) };
+}
+function renderSettings() {
+  const nb = nodeByKey();
+  $('#ownedChips').innerHTML = S.owned.map(k => `<span class="chip">${esc(nb[k]?.name || k)}<button data-k="${k}" class="oDel">✕</button></span>`).join('')
+    + (S.owned.length ? `<button class="link" id="ownedClear">모두 지우기</button>` : '');
+  const tn = Object.fromEntries(META.towns.map(t => [t.tk, t.name]));
+  $('#bedChips').innerHTML = Object.entries(S.beds).map(([tk, n]) => `<span class="chip">${esc(tn[tk])} +${n}<button data-tk="${tk}" class="bDel">✕</button></span>`).join('');
+  const hb = Object.fromEntries(META.houses.map(h => [h.k, h]));
+  $('#houseChips').innerHTML = S.owned_houses.map(k => `<span class="chip">${esc(hb[k]?.name || k)}<button data-k="${k}" class="hDel">✕</button></span>`).join('')
+    + (S.owned_houses.length ? `<button class="link" id="houseClear">모두 지우기</button>` : '');
+  $('#srcInfo').innerHTML = nSrcText();
+  $('#resourcePct').value = S.resource_pct;
+  $('#lodgeEff').value = S.lodge_eff_min;
+  $('#extraWorkers').value = S.extra_workers;
+  $('#goal').value = S.goal;
+  $('#imperialWorkers').value = S.imperial_workers;
+  $('#storageOn').checked = S.storage; $('#valuePack').checked = S.value_pack; $('#workerKinds').value = S.workers;
+  $('#cpTotal').value = S.cp_total; $('#cpRent').value = S.cp_rent; $('#cpOther').value = S.cp_other; renderTime();
+  const b = budgetCalc();
+  $('#cpBreakdown').innerHTML = b ? `총 ${b.total} − 장비 대여 ${b.rent} = <b>창고·숙소·노드용 ${b.infra}</b>
+    − 기타 소모 ${b.other} − 이미 투자한 노드·가진 집 ${b.own}${b.storeN ? ` − 창고용 집(효율 ${S.lodge_eff_min}↑ ${b.storeN}채) ${b.store}` : ''}
+    = <b style="color:var(--accent)">이번에 쓸 수 있는 ${b.avail}</b>` : '제한 없이 계산합니다.';
+  const parts = [];
+  const bb = budgetCalc();
+  parts.push(S.goal === 'min' ? '공헌도 최소' : bb ? '생산량 최대' : '생산량 최대(총 공헌도 필요)');
+  if (bb) parts.push(`쓸 수 있는 공헌도 ${bb.avail}`);
+  if (S.owned.length) parts.push(`보유 노드 ${S.owned.length}`);
+  if (S.owned_houses.length) parts.push(`보유 집 ${S.owned_houses.length}`);
+  if (!S.storage) parts.push('창고 계산 끔');
+  if (S.resource_pct) parts.push(`자원량 ${S.resource_pct}%`);
+  if (S.lodge_eff_min !== '') parts.push(`효율 ${S.lodge_eff_min}↑ 숙소 제외`);
+  if (S.extra_workers) parts.push(`추가 일꾼 ${S.extra_workers}`);
+  if (S.imperial_workers) parts.push(`황실 공방 ${S.imperial_workers}`);
+  const nSrc = Object.keys(S.sourcing).length;
+  if (nSrc) parts.push(`조달 지정 ${nSrc}`);
+  if (S.workers !== 'auto') parts.push({ goblin: '고블린만', giant: '거인만', 'goblin,giant': '고블린+거인' }[S.workers]);
+  if (Object.keys(S.beds).length) parts.push(`추가 숙소 ${Object.values(S.beds).reduce((a, b) => a + b, 0)}`);
+  $('#settingsSummary').textContent = parts.join(' · ');
+}
+$('#ownedChips').addEventListener('click', e => {
+  if (e.target.classList.contains('oDel')) S.owned = S.owned.filter(k => k !== +e.target.dataset.k);
+  if (e.target.id === 'ownedClear') S.owned = [];
+  save(); renderSettings();
+});
+$('#houseChips').addEventListener('click', e => {
+  if (e.target.classList.contains('hDel')) S.owned_houses = S.owned_houses.filter(k => k !== +e.target.dataset.k);
+  if (e.target.id === 'houseClear') S.owned_houses = [];
+  save(); renderSettings();
+});
+$('#storageOn').onchange = e => { S.storage = e.target.checked; save(); renderSettings(); };
+$('#valuePack').onchange = e => { S.value_pack = e.target.checked; save(); };
+$('#imperialWorkers').onchange = e => { S.imperial_workers = Math.min(8, Math.max(0, Math.round(+e.target.value) || 0)); save(); renderSettings(); };
+$('#goal').onchange = e => { S.goal = e.target.value; save(); renderSettings(); };
+$('#extraWorkers').onchange = e => { S.extra_workers = Math.max(0, Math.round(+e.target.value) || 0); save(); renderSettings(); };
+$('#lodgeEff').onchange = e => { S.lodge_eff_min = e.target.value === '' ? '' : Math.max(0, +e.target.value); save(); renderSettings(); };  // renderSettings 가 예산 내역도 다시 계산
+$('#resourcePct').onchange = e => { S.resource_pct = Math.min(100, Math.max(0, +e.target.value || 0)); save(); renderSettings(); };
+$('#workerKinds').onchange = e => { S.workers = e.target.value; save(); renderSettings(); };
+$('#bedChips').addEventListener('click', e => {
+  if (e.target.classList.contains('bDel')) { delete S.beds[e.target.dataset.tk]; save(); renderSettings(); }
+});
+$('#bedAdd').onclick = () => {
+  const tk = $('#bedTown').value, n = Math.max(1, +$('#bedCount').value || 1);
+  S.beds[tk] = n; save(); renderSettings();
+};
+['cpTotal', 'cpRent', 'cpOther'].forEach(id => {
+  const key = { cpTotal: 'cp_total', cpRent: 'cp_rent', cpOther: 'cp_other' }[id];
+  $('#' + id).onchange = e => { S[key] = e.target.value === '' ? '' : Math.max(0, +e.target.value); save(); renderSettings(); };
+});
+$('#timeLimit').onchange = e => { S.time = Math.max(5, +e.target.value || 60); save(); renderTime(); };
+// 시간 제한: 길수록 더 많은 조합을 검토 → 더 좋은 답을 찾을 가능성↑ (이미 최적이면 일찍 끝남)
+const TIME_PRESETS = [[60, '빠르게'], [180, '보통'], [300, '꼼꼼히'], [600, '최대한']];
+const nextTime = t => (TIME_PRESETS.find(([v]) => v > t) || [Math.min(t * 2, 1800)])[0];
+const timeWord = t => t >= 60 ? `${+(t / 60).toFixed(1)}분` : `${t}초`;
+function renderTime() {
+  $('#timeLimit').value = S.time;
+  $('#timePresets').innerHTML = TIME_PRESETS.map(([v, w]) => `<button class="${S.time === v ? 'primary' : 'ghost'}" data-t="${v}" style="width:auto;padding:4px 12px;font-size:12px;border:1px solid ${S.time === v ? 'var(--accent)' : 'var(--line)'};border-radius:99px">${w} ${timeWord(v)}</button>`).join('');
+  $('#timeHint').innerHTML = '계산은 가능한 노드·마을·집 조합을 하나씩 검토합니다. <b>시간이 길수록 더 많은 조합을 검토해서</b> 공헌도는 적고 생산량은 많은 답을 찾을 가능성이 높아집니다. 더 나은 답이 없다고 확인되면 시간 전에 끝납니다.'
+    + (STATIC ? '<br>웹(브라우저)에서는 PC 프로그램보다 계산이 느려서, 재료가 많으면 <b>5~10분</b>을 권장합니다.' : '');
+}
+$('#timePresets').onclick = e => { const t = +e.target.dataset.t; if (t) { S.time = t; save(); renderTime(); } };
+
+// ---------- 조합식 직접 추가 ----------
+const METHODS = ['공작', '가열하기', '빻기', '흔들어 섞기', '말리기', '장작 패기', '간이 연금', '간이 요리', '기타'];
+const ED = { product: null, method: '공작', out: 1, inputs: [] };
+function renderEditor() {
+  $('#edMethod').innerHTML = METHODS.map(m => `<option ${m === ED.method ? 'selected' : ''}>${m}</option>`).join('');
+  $('#edOut').value = ED.out;
+  $('#edProduct').innerHTML = ED.product ? `선택: <b>${esc(ED.product.name)}</b> <small>#${ED.product.id}</small>` : '아직 선택 안 함';
+  $('#edInputs').innerHTML = ED.inputs.map((m, i) => `<div class="row"><span style="flex:1">${esc(m.name)}</span>
+    <input type="number" min="1" value="${m.qty}" class="edQty" data-i="${i}" style="width:80px"><label>개</label>
+    <button class="ghost edDel" data-i="${i}">✕</button></div>`).join('');
+}
+async function loadEditorList() {
+  const list = await apiGet('/api/manual_recipes');
+  $('#edList').innerHTML = list.length ? `<h2 style="margin-top:14px">직접 추가한 조합식 <small>${list.length}개</small></h2>` + list.map(r => `<div class="card">
+    <div class="card-head"><b>${esc(r.name)}</b><span><button class="link edEdit" data-p="${r.product}">수정</button> · <button class="link edRemove" data-p="${r.product}">삭제</button></span></div>
+    <div class="mats">${esc(r.method)} · 1회 ${r.out}개 ← ${esc(r.inputs.map(([i, q], j) => `${r.input_names[j]} ×${q}`).join(' + '))}</div></div>`).join('') : '';
+  $('#edList').onclick = async e => {
+    const pid = +e.target.dataset.p; if (!pid) return;
+    const r = list.find(x => x.product === pid);
+    if (e.target.classList.contains('edEdit')) {
+      Object.assign(ED, { product: { id: r.product, name: r.name }, method: METHODS.includes(r.method) ? r.method : '기타', out: r.out,
+        inputs: r.inputs.map(([id, qty], j) => ({ id, qty, name: r.input_names[j] })) });
+      renderEditor(); $('#edMsg').textContent = '수정 중';
+    }
+    if (e.target.classList.contains('edRemove')) {
+      await API.call('DELETE', '/api/manual_recipes/' + pid); loadEditorList(); $('#edMsg').textContent = `${r.name} 삭제됨`;
+    }
+  };
+}
+$('#edMethod').onchange = e => ED.method = e.target.value;
+$('#edOut').onchange = e => ED.out = Math.max(0.1, +e.target.value || 1);
+$('#edInputs').addEventListener('change', e => { if (e.target.classList.contains('edQty')) ED.inputs[+e.target.dataset.i].qty = Math.max(1, +e.target.value || 1); });
+$('#edInputs').addEventListener('click', e => { if (e.target.classList.contains('edDel')) { ED.inputs.splice(+e.target.dataset.i, 1); renderEditor(); } });
+$('#edClear').onclick = () => { Object.assign(ED, { product: null, method: '공작', out: 1, inputs: [] }); renderEditor(); $('#edMsg').textContent = ''; };
+$('#edSave').onclick = async () => {
+  if (!ED.product || !ED.inputs.length) { $('#edMsg').textContent = '아이템과 재료를 넣어주세요'; return; }
+  const res = await API.call('POST', '/api/manual_recipes', { product: ED.product.id, method: ED.method, out: ED.out, inputs: ED.inputs.map(m => [m.id, m.qty]) });
+  const j = res.data;
+  $('#edMsg').textContent = res.ok ? `${j.name} 저장됨 — 다음 계산부터 반영` : j.error;
+  if (res.ok) loadEditorList();
+};
+$('#editor').addEventListener('toggle', e => { if (e.target.open) { renderEditor(); loadEditorList(); } });
+
+// ---------- 재료 조달 방법 ----------
+const SRC_KO = { node: '노드', buy: '구매', farm: '재배', self: '따로 모음' };
+function srcSelect(ids, mode) {
+  return `<select class="srcSel" data-ids="${ids.join(',')}" style="width:auto;padding:2px 6px;font-size:12px">${
+    Object.entries(SRC_KO).map(([k, v]) => `<option value="${k}" ${k === mode ? 'selected' : ''}>${v}</option>`).join('')}</select>`;
+}
+function nSrcText() {
+  const n = Object.keys(S.sourcing).length;
+  return n ? `직접 바꾼 재료 ${n}개 · <button class="link" id="srcReset">모두 자동으로 되돌리기</button>` : '';
+}
+document.addEventListener('change', e => {
+  if (!e.target.classList.contains('srcSel')) return;
+  e.target.dataset.ids.split(',').forEach(i => { S.sourcing[i] = e.target.value; });
+  save(); renderSettings();
+  const b = $('#runBtn'); b.textContent = '다시 계산하기 (조달 방법 바뀜)';
+});
+document.addEventListener('click', e => {
+  if (e.target.id !== 'srcReset') return;
+  S.sourcing = {}; save(); renderSettings();
+  $('#runBtn').textContent = '다시 계산하기 (조달 방법 바뀜)';
+});
+
+// ---------- 계산 ----------
+$('#runBtn').onclick = async () => {
+  if (!S.products.length && !S.materials.length) { showTab('blk-input'); $('#runError').innerHTML = '<div class="error">완성품이나 재료를 먼저 추가하세요.</div>'; return; }
+  const btn = $('#runBtn'), tb = $('#tabRun');
+  if (btn.disabled) return;
+  btn.disabled = tb.disabled = true; btn.textContent = tb.textContent = '계산 중…'; $('#runError').innerHTML = '';
+  showTab('blk-summary');  // 계산 중 애니메이션이 요약·지도 탭에 나옴
+  showPulseMap();
+  try {
+    const res = await API.call('POST', '/api/plan', { products: S.products, materials: S.materials, owned: S.owned, owned_houses: S.owned_houses,
+        beds: S.beds, budget: budgetCalc() ? budgetCalc().avail : '', time: S.time, days: S.days, storage: S.storage, value_pack: S.value_pack,
+        worker_kinds: S.workers === 'auto' ? null : S.workers.split(','), sourcing: S.sourcing, resource_pct: S.resource_pct, lodge_eff_min: S.lodge_eff_min,
+        reserved_houses: reservedHouses(), extra_workers: S.extra_workers, imperial_workers: S.imperial_workers, goal: S.goal });
+    if (!res.ok) throw new Error(res.data && res.data.error || `서버 오류 ${res.status}`);
+    LAST = res.data; LAST.days = S.days; LAST.time_limit = S.time; renderResults(LAST);
+  } catch (err) {
+    $('#runError').innerHTML = $('#resSummary').innerHTML = `<div class="error">${esc(err.message)} — ${NO_ENGINE}</div>`;
+  } finally { btn.disabled = tb.disabled = false; btn.textContent = tb.textContent = '계산하기'; stopPulseMap(); }
+};
+
+// 답의 신뢰도: 솔버가 알려 주는 '최적과의 차이 최대치(갭)' 를 말로. 시간 제한에 걸렸으면 늘려서 다시 계산 버튼
+function quality(r) {
+  const g = r.gap ?? 1, gp = `${(g * 100).toFixed(g < 0.1 ? 1 : 0)}%`;
+  const done = r.status === 'Optimal';
+  if (done || g <= 0.02) return { lv: 0, color: 'var(--ok)', label: done && g <= 0.001 ? '최적의 답' : '최적에 매우 가까운 답',
+    tip: done ? '더 좋은 조합이 없다고 확인했습니다.' : `더 좋은 답이 있어도 차이는 최대 ${gp} 이내입니다.` };
+  if (g <= 0.15) return { lv: 1, color: 'var(--ok)', label: '좋은 답', tip: `시간 안에 다 확인하지는 못했습니다. 더 좋은 답이 있다면 최대 ${gp}까지 나을 수 있습니다.` };
+  if (g <= 0.6) return { lv: 2, color: 'var(--accent)', label: '괜찮은 답 · 더 좋아질 여지 있음', tip: `시간 안에 검토를 끝내지 못했습니다 (최적과 차이 최대 ${gp}). 시간을 늘리면 공헌도를 아끼거나 생산량을 늘린 답을 찾을 수 있습니다.` };
+  return { lv: 3, color: 'var(--bad)', label: '빠르게 찾은 답 · 검토가 부족함', tip: '시간 안에 조합을 거의 검토하지 못해 처음 찾은 답에 가깝습니다. 시간을 늘려 다시 계산해 보세요.' };
+}
+function qualityHtml(r) {
+  const lim = r.time_limit ?? S.time, q = quality(r), more = q.lv > 0 && r.status === 'Time limit reached' ? nextTime(lim) : 0;
+  return `<div class="quality" style="border-color:${q.color}">
+    <div><b style="color:${q.color}">${q.label}</b> <small style="color:var(--muted)">시간 제한 ${timeWord(lim)} · 실제 ${r.time.toFixed(0)}초</small>
+      <p>${q.tip}</p></div>
+    ${more ? `<button class="primary" id="moreTime" data-t="${more}">⏱ ${timeWord(more)}로 늘려서 다시 계산</button>` : ''}
+  </div>`;
+}
+document.addEventListener('click', e => {
+  if (e.target.id !== 'moreTime') return;
+  S.time = +e.target.dataset.t; save(); renderTime(); $('#runBtn').click();
+});
+
+function renderResults(r) {
+  const sum = $('#resSummary'), work = $('#resWork'), mats = $('#resMats');
+  if (!r.slots.length) {
+    sum.innerHTML = '<div class="empty">노드로 얻을 수 있는 재료가 없습니다.</div>';
+    work.innerHTML = '<div class="empty">배치할 일꾼이 없습니다.</div>';
+    mats.innerHTML = othersHtml(r);
+    $('#resRecipe').innerHTML = expansionHtml(r);
+    $('#bdMats').textContent = '';
+    $('#sumSummary').textContent = $('#workSummary').textContent = '';
+    $('#matsSummary').textContent = `노드 계산에서 빠진 재료 ${r.others.length}종`;
+    return;
+  }
+  const total = r.node_cp + r.house_cp;
+  const short = r.slots.filter(s => !covered(s.got, s.qty - s.nice));
+  const statusText = r.status === 'Optimal' ? '계산 완료' : r.status === 'Time limit reached' ? '시간 제한까지 찾은 최선의 답' : r.status;
+
+  // 헤더 요약 (접어도 보이도록)
+  $('#sumSummary').textContent = `총 ${total} CP · 일꾼 ${r.chosen.length}명${short.length ? ` · 부족 ${short.length}종` : ''}`;
+  $('#workSummary').textContent = `일꾼 ${r.chosen.length} · 노드 ${r.invested.length}개 ${r.node_cp} CP · 집 ${newHouses(r).length}채 ${r.house_cp} CP${resHouses(r).length ? ` · 창고용 ${resHouses(r).length}채 ${resCp(r)} CP` : ''}`;
+  $('#bdMats').textContent = short.length || '';
+  $('#matsSummary').textContent = `노드 재료 ${r.slots.length}종${short.length ? ` (부족 ${short.length})` : ''} · 노드 계산에서 빠진 재료 ${r.others.length}종`;
+
+  // 중간 2: 요약 · 지도
+  sum.innerHTML = `
+    <div class="stats">
+      <div class="stat main"><span>총 공헌도</span><b>${total}</b></div>
+      <div class="stat"><span>노드</span><b>${r.node_cp}</b></div>
+      <div class="stat"><span>집 (새로 구매 ${newHouses(r).length}채)</span><b>${r.house_cp}</b></div>
+      ${resHouses(r).length ? `<div class="stat"><span>창고용 집 ${resHouses(r).length}채 (미리 뺌)</span><b>${resCp(r)}</b></div>` : ''}
+      <div class="stat"><span>일꾼</span><b>${r.chosen.length}명</b></div>
+      ${r.goal === 'max' ? `<div class="stat"><span>생산 배율 (입력 수량 대비)</span><b>×${r.scale.toFixed(1)}${r.scale_max - r.scale > 0.05 ? `<small style="font-size:15px"> ~ ×${r.scale_max.toFixed(1)}</small>` : ''}</b></div>` : ''}
+    </div>
+    ${qualityHtml(r)}
+    ${scaleNote(r)}
+    ${r.auto_found && r.auto_found.length ? `<div class="panel" style="margin-top:12px;border-color:var(--accent)">코덱스 아이템 설명에서 조합식을 자동으로 찾았습니다: <b>${esc(r.auto_found.join(', '))}</b><p class="hint">게임과 다르면 설정의 '조합식 직접 추가'에서 고칠 수 있습니다.</p></div>` : ''}
+    <div class="status">${esc(statusText)} · ${r.time.toFixed(1)}초${budgetCalc() ? ` · 쓸 수 있는 공헌도 ${budgetCalc().avail}` : ''}${short.length ? ` · <b style="color:var(--bad)">부족한 재료 ${short.length}종</b>` : ''}</div>
+    <div class="row" style="margin-top:10px">
+      <button id="exText">📋 텍스트 복사</button><button id="exCsv">⬇ 엑셀(CSV)</button><button id="exReport" class="primary" style="width:auto">📄 보고서 (PDF)</button><button id="exPng">🖼 이미지 (지도 + 목록)</button>
+      <span class="hint" id="exMsg" style="margin:0"></span>
+    </div>
+    <div style="margin-top:12px">
+      <div class="hint" style="margin:0 0 6px">지도 · 휠: 확대/축소 · 드래그: 이동 · 더블클릭 또는 ⛶: 크게 보기 · 점에 마우스: 이름</div>
+      <div class="mapwrap"><svg id="map"></svg>
+        <div class="map-tools"><button id="zoomIn" title="확대">＋</button><button id="zoomOut" title="축소">－</button><button id="fitPlan">계획 맞춤</button><button id="fitAll">전체</button><button id="mapFull" title="크게 보기 (더블클릭도 됨) · Esc 로 닫기">⛶ 크게</button></div></div>
+      <div class="legend"><span><i style="background:var(--accent)"></i>새로 투자</span><span><i style="background:var(--owned)"></i>보유</span>
+        <span><i style="background:var(--ink)"></i>일꾼 마을</span><span><i style="background:var(--accent);border-radius:1px"></i>집</span><span><i style="background:var(--map-node)"></i>기타 노드</span></div>
+    </div>`;
+
+  // 중간 3: 일꾼 · 노드 · 집
+  work.innerHTML = `
+    ${r.node_sets && r.node_sets.length ? `<div class="panel">
+      <h2>노드 종류별 생산 <small>하루 기준 · <b style="color:var(--accent)">필요한 재료</b> 먼저, 흐린 건 덤 · 행운 제외</small></h2>
+      <div class="sets">${r.node_sets.map(st => `<div class="set">
+        <h3>${esc(st.type)} <small>일꾼 ${st.workers}명 · ${st.items.length}종</small></h3>
+        <ul>${st.items.map(i => `<li class="${i.need ? 'need' : 'extra'}" title="${i.need ? '계획에 필요한 재료' : '덤 (같이 나오는 아이템)'}"><span>${esc(i.name)}</span><b>${fmt(i.daily)}</b></li>`).join('')}</ul>
+        <p class="hint" title="${esc(st.zones.join(', '))}">${esc(st.zones.slice(0, 3).join(', '))}${st.zones.length > 3 ? ` 외 ${st.zones.length - 3}곳` : ''}</p></div>`).join('')}</div>
+    </div>` : ''}
+    <div class="panel" style="margin-top:12px">
+      <h2>일꾼 배치 <small>레벨 40 장인 일꾼 중간값 기준</small></h2>
+      <div class="tablewrap"><table>
+        <thead><tr><th>마을</th><th>생산 노드</th><th>하루 생산</th><th>일꾼</th></tr></thead>
+        <tbody>${byRegion(r.chosen, c => `<tr>
+          <td>${esc(c.town_name)}</td>
+          <td>${esc(c.zone_name)}<br><small>작업량 ${c.workload} · 거리 ${fmt(c.dist)}</small></td>
+          <td>${c.yields.map(y => `${esc(y.label)} <b>${fmt(y.daily)}</b>`).join('<br>')}</td>
+          <td>${esc(c.kind)}<br><small>작업 ${c.wspd} · 이동 ${c.mspd}</small></td></tr>`, null, 4).join('')}</tbody>
+      </table></div>
+    </div>
+    ${r.imperial ? `<div class="panel" style="margin-top:12px">
+      <h2>황실 공방 <small>${r.imperial}명 · 육조거리 숙소</small></h2>
+    </div>` : ''}
+    ${r.extra && r.extra.length ? `<div class="panel" style="margin-top:12px">
+      <h2>추가 일꾼 (농사용 등) <small>${r.extra.reduce((a, e) => a + e.n, 0)}명 · 숙소만</small></h2>
+      <div class="nodelist">${byRegion(r.extra, e => `<span class="chip" style="padding-right:10px">${esc(e.town_name)} <b>${e.n}</b>명</span>`, g => `<b style="font-size:12px;margin:0 2px 0 8px">${esc(g || '기타')}</b>`).join('')}</div>
+      <p class="hint">마을 기본 침대가 비어 있다고 보고 배치했습니다.</p>
+    </div>` : ''}
+    <div class="panel" style="margin-top:12px">
+      <h2>투자할 노드 <small>${r.invested.length}개 · ${r.node_cp} CP</small></h2>
+      <div class="nodelist">${r.invested.map(n => `<span class="chip" style="padding-right:10px">${esc(n.name)} <small>${n.cp}</small></span>`).join('') || '<small>없음</small>'}</div>
+      ${r.invested.length ? `<p class="hint"><button class="link" id="addOwned">이 노드들을 보유 노드로 추가</button> (투자 후 다음 계산에 반영)</p>` : ''}
+    </div>
+    <div class="panel" style="margin-top:12px">
+      <h2>집 <small>${newHouses(r).length}채 새로 구매 · ${r.house_cp} CP${resText(r)}</small></h2>
+      ${r.houses.length ? `<div class="tablewrap"><table>
+        <thead><tr><th class="chk"><input type="checkbox" id="hChkAll" title="전부 체크 / 해제"></th><th>마을</th><th>집</th><th>용도</th><th>공헌도</th><th>창고 효율</th><th>시트 비고</th></tr></thead>
+        <tbody>${byRegion(r.houses, h => `<tr class="${h.owned || S.house_checks[h.key] ? 'done' : ''}">
+          <td class="chk"><input type="checkbox" class="hChk" data-k="${h.key}" ${h.owned || S.house_checks[h.key] ? 'checked' : ''} ${h.owned ? 'disabled title="이미 보유"' : 'title="샀으면 체크"'}></td>
+          <td>${esc(h.town_name)}</td>
+          <td>${esc(h.name)}</td>
+          <td>${h.use === '숙소' ? `숙소 <b>${h.lodge_lv}단계</b> → ${h.beds}명` : h.use === '창고' ? `창고 <b>${h.store_lv}단계</b> → ${h.slots}칸` : '<small>선행 조건 (다음 집 구매용)</small>'}</td>
+          <td>${h.owned ? '<span class="tag" style="background:var(--ok-soft);color:var(--ok)">보유</span>' : h.reserved ? `<span class="tag" title="예산에서 미리 뺀 창고용 집">창고용 ${h.cp}</span>` : h.cp}</td>
+          <td>${h.eff ? h.eff.toFixed(2) : '-'}</td>
+          <td><small>${esc(h.note || '')}</small></td></tr>`, null, 7).join('')}</tbody></table></div>
+        ${r.houses.some(h => !h.owned) ? `<p class="hint"><span id="hChkCount"></span> <button class="link" id="addHouses"></button> (다음 계산에 반영)</p>` : ''}
+        <p class="hint">단계는 집 최대 단계 기준 인원·칸입니다. 은화로 그 단계까지 올려야 합니다.</p>`
+      : '<small>새로 살 집 없음 (마을 기본 숙소로 충분)</small>'}
+      ${r.storage && r.storage.length ? `<p class="hint" style="margin-top:10px">창고 사용: ${r.storage.map(st =>
+          `${esc(st.town_name)} <b style="color:${st.need > st.cap ? 'var(--bad)' : 'inherit'}">${st.need}</b>/${st.cap}칸`).join(' · ')}</p>` : ''}
+    </div>`;
+
+  // 최하단: 재료
+  mats.innerHTML = `
+    <div class="panel">
+      <h2>재료 충족 <small>하루 기준 · 부족한 재료부터</small></h2>
+      ${[...r.slots].sort((x, y) => covered(x.got, x.qty - x.nice) - covered(y.got, y.qty - y.nice) || x.got / x.qty - y.got / y.qty).map(s => { const ok = covered(s.got, s.qty); const pct = Math.min(100, s.got / s.qty * 100);
+        return `<div class="slot"><div class="slot-head"><span>${esc(s.label)} ${srcSelect(s.ids, s.mode)}</span>
+          <span class="${ok ? '' : (covered(s.got, s.qty - s.nice) ? '' : 'bad')}">${fmt(s.got)} / ${fmt(s.qty)}${s.nice ? ` <small>(여유 ${fmt(s.nice)})</small>` : ''}${ok ? '' : (covered(s.got, s.qty - s.nice) ? ' <small>여유분 일부</small>' : ' 부족')}</span></div>
+          <div class="bar ${ok ? '' : 'bad'}"><i style="width:${pct}%"></i></div>
+          ${s.items.length > 1 ? `<div class="slot-items">${esc(s.items.join(', '))}</div>` : ''}</div>`; }).join('')}
+    </div>
+    ${othersHtml(r)}`;
+  $('#resRecipe').innerHTML = expansionHtml(r);
+
+  drawMap(r);
+  $('#exText').onclick = () => exportText(r);
+  $('#exCsv').onclick = () => exportCsv(r);
+  $('#exPng').onclick = () => exportPng(r);
+  $('#exReport').onclick = () => openReport(r);
+  // 집 구매 체크 (산 집 표시, 브라우저에 저장). 버튼은 체크한 집만, 체크가 없으면 전부 보유로 추가
+  const addH = $('#addHouses'), toBuy = r.houses.filter(h => !h.owned);
+  const checked = () => toBuy.filter(h => S.house_checks[h.key]);
+  const syncChk = () => {
+    if (!addH) return;
+    const n = checked().length;
+    $('#hChkCount').textContent = `구매 체크 ${n}/${toBuy.length}채 ·`;
+    addH.textContent = n ? `체크한 ${n}채를 보유한 집으로 추가` : '이 집들을 전부 보유한 집으로 추가';
+    const all = $('#hChkAll'); if (all) { all.checked = n === toBuy.length; all.indeterminate = n > 0 && n < toBuy.length; }
+  };
+  const setChk = (k, on) => { if (on) S.house_checks[k] = true; else delete S.house_checks[k];
+    const box = work.querySelector(`.hChk[data-k="${k}"]`); if (box) { box.checked = on; box.closest('tr').classList.toggle('done', on); } };
+  work.querySelectorAll('.hChk:not([disabled])').forEach(b => b.onchange = () => { setChk(+b.dataset.k, b.checked); save(); syncChk(); });
+  if ($('#hChkAll')) $('#hChkAll').onchange = e => { toBuy.forEach(h => setChk(h.key, e.target.checked)); save(); syncChk(); };
+  syncChk();
+  if (addH) addH.onclick = () => {
+    const add = (checked().length ? checked() : toBuy).map(h => h.key);
+    S.owned_houses = [...new Set([...S.owned_houses, ...add])]; add.forEach(k => delete S.house_checks[k]);
+    save(); renderSettings(); addH.textContent = `${add.length}채 추가됨 ✓`;
+  };
+  const add = $('#addOwned');
+  if (add) add.onclick = () => { S.owned = [...new Set([...S.owned, ...r.invested.map(n => n.k)])]; save(); renderSettings(); add.textContent = '추가됨 ✓'; };
+}
+// ---------- 결과 내보내기 ----------
+const today = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };  // 한국 시간 기준 날짜
+const useText = h => h.use === '숙소' ? `숙소 ${h.lodge_lv}단계(${h.beds}명)` : h.use === '창고' ? `창고 ${h.store_lv}단계(${h.slots}칸)` : '선행 조건';
+function exMsg(t) { const el = $('#exMsg'); if (el) { el.textContent = t; setTimeout(() => { if (el.textContent === t) el.textContent = ''; }, 3000); } }
+function download(name, blob) {
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name;
+  document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+// 거점별 묶음: 거점이 바뀔 때 머리 행/줄 하나 (목록은 서버가 거점 → 마을 순으로 정렬해 보냄)
+const byRegion = (list, row, head, cols) => { let prev; return list.map(x => {
+  const h = x.region !== prev ? (head ? head(x.region) : `<tr class="grp"><td colspan="${cols}">${esc(x.region || '기타')}</td></tr>`) : '';
+  prev = x.region; const v = row(x); return typeof v === 'string' ? (h || '') + v : v; }); };  // 텍스트용은 head 가 줄을 넣고 원래 항목을 돌려줌
+// 새로 살 집(이번 계산 공헌도) / 창고용 집(예산에서 미리 뺀 것) 을 나눠 셈
+const newHouses = r => r.houses.filter(h => !h.owned && !h.reserved);
+const resHouses = r => r.houses.filter(h => h.reserved);
+const resCp = r => resHouses(r).reduce((a, h) => a + h.cp, 0);
+const resText = r => resHouses(r).length ? ` · 창고용 ${resHouses(r).length}채 ${resCp(r)} CP (예산에서 미리 뺌)` : '';
+function exportText(r) {
+  const L = [];
+  L.push(`[검은사막 노드 플래너] ${today()}`);
+  L.push(`총 공헌도 ${r.node_cp + r.house_cp} (노드 ${r.node_cp} + 집 ${r.house_cp})${resText(r)} · 일꾼 ${r.chosen.length}명`);
+  L.push('', '■ 만들 것');
+  r.expansion.forEach(e => L.push(`- ${e.name} ×${e.crafts}${e.scale > 1.005 ? ` → ${fmt(e.crafts * e.scale)} 가능 (×${e.scale.toFixed(1)})` : ''}${e.days > 1 ? ` / ${fmt(e.days)}일` : ' / 하루'}${e.priority === 'nice' ? ' (여유)' : ''}`));
+  L.push('', '■ 일꾼 배치');
+  byRegion(r.chosen, c => c, g => (L.push(`[${g || '기타'}]`), null)).forEach(c => L.push(`- ${c.town_name} ${c.kind} → ${c.zone_name} (${c.yields.map(y => `${y.label} ${fmt(y.daily)}/일`).join(', ')})`));
+  if (r.imperial) L.push('', `■ 황실 공방 ${r.imperial}명 (육조거리)`);
+  if (r.extra && r.extra.length) L.push('', `■ 추가 일꾼 (농사용 등) ${r.extra.reduce((a, e) => a + e.n, 0)}명`, r.extra.map(e => `${e.town_name} ${e.n}`).join(', '));
+  if (r.node_sets && r.node_sets.length) {
+    L.push('', '■ 노드 종류별 생산 (하루)');
+    r.node_sets.forEach(st => L.push(`[${st.type}] 일꾼 ${st.workers}명 — ${st.items.map(i => `${i.name} ${fmt(i.daily)}`).join(', ')}`));
+  }
+  L.push('', `■ 투자할 노드 (${r.invested.length}개 · ${r.node_cp} CP)`);
+  L.push(r.invested.map(n => `${n.name}(${n.cp})`).join(', ') || '없음');
+  const buy = r.houses.filter(h => !h.owned);
+  L.push('', `■ 구매할 집 (새로 ${newHouses(r).length}채 · ${r.house_cp} CP${resText(r)})`);
+  byRegion(buy, h => h, g => (L.push(`[${g || '기타'}]`), null)).forEach(h => L.push(`- ${h.town_name} · ${h.name} · ${useText(h)} · ${h.cp}CP${h.reserved ? ' (창고용)' : ''}${h.note ? ` · ${h.note}` : ''}`));
+  if (!buy.length) L.push('없음');
+  const short = r.slots.filter(s => !covered(s.got, s.qty - s.nice));
+  if (short.length) {
+    L.push('', '■ 노드로 부족한 재료 (하루)');
+    short.forEach(s => L.push(`- ${s.label}: ${fmt(s.got)} / ${fmt(s.qty)}`));
+  }
+  const groups = {};
+  r.others.forEach(o => (groups[o.reason] = groups[o.reason] || []).push(`${o.label} ${fmt(o.qty)}`));
+  if (r.others.length) {
+    L.push('', '■ 노드 계산에서 빠진 재료 (하루)');
+    Object.entries(groups).forEach(([k, v]) => L.push(`- ${k}: ${v.join(', ')}`));
+  }
+  const text = L.join('\n');
+  const done = () => exMsg('복사했습니다');
+  if (navigator.clipboard && window.isSecureContext) navigator.clipboard.writeText(text).then(done, () => fallbackCopy(text, done));
+  else fallbackCopy(text, done);
+}
+function fallbackCopy(text, done) {
+  const ta = document.createElement('textarea'); ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+  document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove(); done();
+}
+function exportCsv(r) {
+  const q = v => `"${String(v ?? '').replace(/"/g, '""')}"`;
+  const rows = [];
+  const sec = (title, head, list) => { rows.push([title], head, ...list, []); };
+  sec('요약', ['총 공헌도', '노드 공헌도', '집 공헌도(새로 구매)', '창고용 집 공헌도(미리 뺌)', '일꾼'], [[r.node_cp + r.house_cp, r.node_cp, r.house_cp, resCp(r), r.chosen.length]]);
+  sec('만들 것', ['이름', '수량', '기간(일)', '우선순위', '병목'], r.expansion.map(e => [e.name, e.crafts, Math.round(e.days * 10) / 10, e.priority === 'nice' ? '여유' : '필수', e.bottleneck ? e.bottleneck.label : '']));
+  sec('일꾼 배치', ['지역', '마을', '일꾼', '생산 노드', '하루 생산', '작업량', '거리'], r.chosen.map(c => [c.region, c.town_name, c.kind, c.zone_name, c.yields.map(y => `${y.label} ${Math.round(y.daily)}`).join(' / '), c.workload, Math.round(c.dist)]));
+  if (r.node_sets) sec('노드 종류별 생산(하루)', ['종류', '일꾼', '아이템', '하루'], r.node_sets.flatMap(st => st.items.map(i => [st.type, st.workers, i.name, +i.daily.toFixed(2)])));
+  sec('하위 재료 전체', ['완성품', '단계', '재료', '얻는 법', '수량(입력)', '수량(가능)'], r.expansion.flatMap(e => (e.tree || []).map(x =>
+    [e.name, x.depth, '  '.repeat(x.depth) + x.label, x.how, +x.qty.toFixed(2), +(x.qty * (e.scale || 1)).toFixed(2)])));
+  sec('투자할 노드', ['노드', '공헌도'], r.invested.map(n => [n.name, n.cp]));
+  sec('집', ['지역', '마을', '집', '용도', '공헌도', '보유', '시트 비고'], r.houses.map(h => [h.region, h.town_name, h.name, useText(h), h.cp, h.owned ? '보유' : h.reserved ? '창고용' : '', h.note || '']));
+  sec('재료 충족(하루)', ['재료', '필요', '확보', '여유분', '상태'], r.slots.map(s => [s.label, +s.qty.toFixed(3), +s.got.toFixed(3), s.nice || 0, covered(s.got, s.qty - s.nice) ? '충족' : '부족']));
+  sec('노드 계산에서 빠진 재료(하루)', ['재료', '수량', '조달'], r.others.map(o => [o.label, +o.qty.toFixed(3), o.reason]));
+  const csv = '\ufeff' + rows.map(row => row.map(q).join(',')).join('\r\n');  // BOM: 엑셀에서 한글 깨짐 방지
+  download(`노드플래너_${today()}.csv`, new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+  exMsg('CSV 파일을 저장했습니다');
+}
+// ---------- 보고서 (인쇄 → PDF) ----------
+// 새 창에 A4 가로 보고서: 요약 / 전체 지도(번호) / 거점별 확대 지도(이름) + 표 / 재료·레시피.
+// 지도는 SVG(벡터)라 PDF 로 저장해도 확대하면 선명함. 이름 겹침은 빈 자리를 찾아 놓고, 멀어지면 가는 선으로 이음
+const RP = { ink: '#1d1d1b', muted: '#6b6a66', line: '#e3e1db', accent: '#b5562b', owned: '#2f6db5', edge: '#d9d6ce', node: '#b9b5ab', bg: '#faf9f6' };
+let _measure = null;
+const textW = (t, size, bold) => {
+  _measure = _measure || document.createElement('canvas').getContext('2d');
+  _measure.font = `${bold ? '700 ' : ''}${size}px "Pretendard","Malgun Gothic",sans-serif`;
+  return _measure.measureText(t).width;
+};
+// 이름표 놓기: 점 주변 8방향 → 조금씩 멀리. 화면 밖·다른 이름표·표시점·경로 선과 안 겹치는 첫 자리.
+// 빽빽해서 없으면 경로 선(soft)은 겹쳐도 되게 다시 찾고, 그래도 없으면 그냥 오른쪽에 둠 (빠지는 이름 없게)
+function placeLabels(items, obstacles, W, H, soft = []) {
+  const placed = [...obstacles], out = [];
+  const over = (a, b) => a.x0 < b.x1 && a.x1 > b.x0 && a.y0 < b.y1 && a.y1 > b.y0;
+  const outside = a => a.x0 < 2 || a.y0 < 2 || a.x1 > W - 2 || a.y1 > H - 2;
+  const RINGS = [3, 16, 30, 46, 64, 88, 116];
+  for (const it of items) {
+    const w = (it.badge ? textW(it.text, it.size, true) + 8 : textW(it.text, it.size, it.bold) + 4), h = it.size + (it.badge ? 5 : 3);
+    const find = useSoft => {
+      for (const [n, step] of RINGS.entries()) {
+        const D = it.r + step, e = D * 0.72;
+        for (const [dx, dy] of [[D, -h / 2], [-D - w, -h / 2], [-w / 2, -D - h], [-w / 2, D], [e, -e - h], [-e - w, -e - h], [e, e], [-e - w, e]]) {
+          const rc = { x0: it.x + dx, y0: it.y + dy, x1: it.x + dx + w, y1: it.y + dy + h };
+          if (!outside(rc) && !placed.some(b => over(rc, b)) && !(useSoft && soft.some(b => over(rc, b)))) return { rc, leader: n > 0 };
+        }
+      }
+      return null;
+    };
+    const best = find(true) || find(false) || { rc: { x0: it.x + it.r + 3, y0: it.y - h / 2, x1: it.x + it.r + 3 + w, y1: it.y + h / 2 }, leader: false };
+    placed.push(best.rc); out.push({ ...it, ...best, w, h });
+  }
+  return out;
+}
+// 지도 한 장 (SVG 문자열). focus: 이 일꾼들만 강조(번호 num), towns/houses: 표시할 마을·집, labels: 'num' | 'name'
+function reportMap(r, { focus, houses, W = 1000, H = 560, labels, fitHouses = false }) {
+  const M = META.map, nb = nodeByKey(), X = n => n.x, Y = n => -n.z;
+  const num = new Map(r.chosen.map((c, i) => [c, i + 1]));
+  const townWp = new Map(META.towns.map(t => [t.tk, t.wp]));
+  const towns = [...new Set(focus.map(c => townWp.get(c.town)))].map(k => nb[k]).filter(Boolean);
+  const routePts = focus.flatMap(c => c.route.map(k => nb[k])).filter(Boolean);
+  const pts = [...towns, ...routePts, ...(focus.length && !fitHouses ? [] : houses.filter(h => h.pos).map(h => ({ x: h.pos[0], z: h.pos[1] })))];
+  if (!pts.length) return '';
+  let x0 = Math.min(...pts.map(X)), x1 = Math.max(...pts.map(X)), y0 = Math.min(...pts.map(Y)), y1 = Math.max(...pts.map(Y));
+  const padX = Math.max((x1 - x0) * 0.08, 6000), padY = Math.max((y1 - y0) * 0.08, 6000);
+  x0 -= padX; x1 += padX; y0 -= padY; y1 += padY;
+  const s = Math.min(W / (x1 - x0), H / (y1 - y0)), ox = (W - (x1 - x0) * s) / 2, oy = (H - (y1 - y0) * s) / 2;
+  const px = n => ox + (X(n) - x0) * s, py = n => oy + (Y(n) - y0) * s;
+  const inV = n => px(n) > -20 && px(n) < W + 20 && py(n) > -20 && py(n) < H + 20;
+  const f = v => v.toFixed(1);
+  const focusSet = new Set(focus), invested = new Set(r.invested.map(n => n.k)), mine = new Set(focus.flatMap(c => c.route));
+  let svg = '';
+  // 바탕 길
+  svg += `<g stroke="${RP.edge}" stroke-width="1">` + M.edges.map(([a, b]) => { const A = nb[a], B = nb[b]; return A && B && (inV(A) || inV(B)) ? `<line x1="${f(px(A))}" y1="${f(py(A))}" x2="${f(px(B))}" y2="${f(py(B))}"/>` : ''; }).join('') + '</g>';
+  // 다른 거점 경로는 옅게, 이 지도 경로는 진하게
+  const routeLines = (cs, col, wd, op) => `<g stroke="${col}" stroke-width="${wd}" stroke-linecap="round" opacity="${op}">` + cs.flatMap(c => c.route.slice(1).map((k, i) => {
+    const A = nb[c.route[i]], B = nb[k]; return A && B && (inV(A) || inV(B)) ? `<line x1="${f(px(A))}" y1="${f(py(A))}" x2="${f(px(B))}" y2="${f(py(B))}"/>` : '';
+  })).join('') + '</g>';
+  svg += routeLines(r.chosen.filter(c => !focusSet.has(c)), RP.accent, 2, 0.25) + routeLines(focus, RP.accent, 3, 1);
+  // 점: 일반 노드 / 투자 노드(경유) / 집 / 일꾼 노드 / 마을
+  svg += M.nodes.filter(inV).map(n => invested.has(n.k) ? `<circle cx="${f(px(n))}" cy="${f(py(n))}" r="3" fill="${RP.accent}" opacity="${mine.has(n.k) ? 1 : 0.3}"/>` : `<circle cx="${f(px(n))}" cy="${f(py(n))}" r="1.6" fill="${RP.node}"/>`).join('');
+  svg += houses.filter(h => h.pos).map(h => { const p = { x: h.pos[0], z: h.pos[1] }; return `<rect x="${f(px(p) - 4)}" y="${f(py(p) - 4)}" width="8" height="8" fill="${h.owned ? RP.owned : RP.accent}" stroke="#fff" stroke-width="1"/>`; }).join('');
+  const zoneDots = focus.map(c => ({ c, n: nb[c.zone] })).filter(z => z.n);
+  svg += zoneDots.map(({ n }) => `<circle cx="${f(px(n))}" cy="${f(py(n))}" r="5.5" fill="${RP.accent}" stroke="#fff" stroke-width="1.5"/>`).join('');
+  svg += towns.map(n => `<circle cx="${f(px(n))}" cy="${f(py(n))}" r="6.5" fill="${RP.ink}" stroke="#fff" stroke-width="2"/>`).join('');
+  // 이름표: 마을 먼저(굵게), 그다음 일꾼 노드 (전체 지도는 번호만)
+  const obstacles = [...zoneDots.map(z => z.n), ...towns].map(n => ({ x0: px(n) - 6, y0: py(n) - 6, x1: px(n) + 6, y1: py(n) + 6 }))
+    .concat(routePts.map(n => ({ x0: px(n) - 3, y0: py(n) - 3, x1: px(n) + 3, y1: py(n) + 3 })));
+  // 경로 선 위에도 되도록 글자가 얹히지 않게 선을 따라 6px 마다 작은 장애물 (자리가 없으면 무시)
+  const lineObs = focus.flatMap(c => c.route.slice(1).flatMap((k, i) => {
+      const A = nb[c.route[i]], B = nb[k]; if (!A || !B) return [];
+      const ax = px(A), ay = py(A), bx = px(B), by = py(B), n = Math.ceil(Math.hypot(bx - ax, by - ay) / 6);
+      return Array.from({ length: n }, (_, j) => { const t = j / n, x = ax + (bx - ax) * t, y = ay + (by - ay) * t; return { x0: x - 2, y0: y - 2, x1: x + 2, y1: y + 2 }; });
+  }));
+  const townName = new Map(META.towns.map(t => [t.wp, t.name]));
+  const seen = new Set();
+  const items = [
+    ...towns.map(n => ({ x: px(n), y: py(n), r: 6.5, text: townName.get(n.k) || n.name, size: 13, bold: true })),
+    ...zoneDots.filter(({ n }) => !seen.has(n.k) && seen.add(n.k)).map(({ c, n }) => ({ x: px(n), y: py(n), r: 5.5, size: labels === 'num' ? 10 : 11, badge: labels === 'num',
+      text: labels === 'num' ? String(num.get(c)) : `${num.get(c)} ${c.zone_name}` })),
+  ];
+  const placed = placeLabels(items, obstacles, W, H, lineObs);
+  svg += placed.map(l => {
+    const { x0: lx, y0: ly, x1: lx1, y1: ly1 } = l.rc;
+    const cx = Math.max(lx, Math.min(l.x, lx1)), cy = Math.max(ly, Math.min(l.y, ly1));
+    const leader = l.leader ? `<line x1="${f(l.x)}" y1="${f(l.y)}" x2="${f(cx)}" y2="${f(cy)}" stroke="${RP.muted}" stroke-width="0.8"/>` : '';
+    if (l.badge) return leader + `<rect x="${f(lx)}" y="${f(ly)}" width="${f(l.w)}" height="${f(l.h)}" rx="${f(l.h / 2)}" fill="${RP.accent}"/>` +
+      `<text x="${f(lx + l.w / 2)}" y="${f(ly + l.h * 0.78)}" font-size="${l.size}" font-weight="700" fill="#fff" text-anchor="middle">${esc(l.text)}</text>`;
+    return leader + `<text x="${f(lx + 2)}" y="${f(ly + l.h * 0.8)}" font-size="${l.size}" ${l.bold ? 'font-weight="700"' : ''} fill="${l.bold ? RP.ink : RP.accent}" stroke="#fff" stroke-width="3" paint-order="stroke">${esc(l.text)}</text>`;
+  }).join('');
+  return `<svg viewBox="0 0 ${W} ${H}" width="100%" style="display:block;background:${RP.bg};border:1px solid ${RP.line};border-radius:6px" font-family="Pretendard,'Malgun Gothic',sans-serif">${svg}</svg>`;
+}
+
+// 한 지역 안에서 서로 멀리 떨어진 마을(예: 벨리아 ↔ 일리야 섬)은 지도를 따로 그림 — 한 장에 넣으면 축소돼 빽빽해짐.
+// 마을별 일꾼 경로 범위가 MAP_GAP 보다 가까우면 같은 지도로 묶음 (게임 좌표, 벨리아~올비아 마을 간 약 16만)
+const MAP_GAP = 80000;
+function townClusters(cs, num) {
+  const nb = nodeByKey(), byTown = new Map();
+  cs.forEach(c => { if (!byTown.has(c.town)) byTown.set(c.town, []); byTown.get(c.town).push(c); });
+  const box = list => { const ps = list.flatMap(c => c.route.map(k => nb[k])).filter(Boolean);
+    return ps.length ? [Math.min(...ps.map(n => n.x)), Math.min(...ps.map(n => n.z)), Math.max(...ps.map(n => n.x)), Math.max(...ps.map(n => n.z))] : null; };
+  const near = (a, b) => !a || !b || Math.hypot(Math.max(0, a[0] - b[2], b[0] - a[2]), Math.max(0, a[1] - b[3], b[1] - a[3])) < MAP_GAP;
+  let gs = [...byTown.values()].map(list => ({ list, b: box(list) }));
+  for (let merged = true; merged;) {
+    merged = false;
+    for (let i = 0; i < gs.length && !merged; i++) for (let j = i + 1; j < gs.length && !merged; j++) {
+      if (near(gs[i].b, gs[j].b)) {
+        const list = [...gs[i].list, ...gs[j].list];
+        gs = [...gs.filter((_, k) => k !== i && k !== j), { list, b: box(list) }];
+        merged = true;
+      }
+    }
+  }
+  return gs.map(g => g.list.sort((a, b) => num.get(a) - num.get(b)));
+}
+
+function reportHtml(r) {
+  const total = r.node_cp + r.house_cp, num = new Map(r.chosen.map((c, i) => [c, i + 1]));
+  const q = quality(r), bc = budgetCalc();
+  // 거점 순서는 결과 순서(서버가 거점 → 마을 순으로 정렬)를 따름. 투자 노드는 그 노드를 지나는 첫 일꾼의 거점으로
+  const ord = (list, x) => { const i = (list || []).indexOf(x); return i < 0 ? 999 : i; };  // 인게임 순서 (META.regions / town_order)
+  const regions = [...new Set([...r.chosen.map(c => c.region), ...r.houses.filter(h => !h.owned).map(h => h.region)])]
+    .sort((a, b) => ord(META.regions, a) - ord(META.regions, b));
+  // 투자 노드는 그 노드를 지나는 첫 일꾼의 거점·마을로
+  const nodeOwner = new Map();
+  r.chosen.forEach(c => c.route.forEach(k => { if (!nodeOwner.has(k)) nodeOwner.set(k, c); }));
+  const nodeRegion = new Map([...nodeOwner].map(([k, c]) => [k, c.region]));
+  const workerTable = cs => `<table><thead><tr><th>#</th><th>일꾼</th><th>노드</th><th>하루 생산</th></tr></thead><tbody>${cs.map(c => `<tr><td class="n">${num.get(c)}</td>
+    <td>${esc(c.kind)}</td><td><b>${esc(c.zone_name)}</b></td><td>${esc(c.yields.map(y => `${y.label} ${fmt(y.daily)}`).join(', '))}</td></tr>`).join('')}</tbody></table>`;
+  const houseTable = hs => `<table><thead><tr><th>집</th><th>용도</th><th class="q">CP</th><th>비고</th></tr></thead><tbody>${hs.map(h => `<tr><td>${esc(h.name)}</td>
+    <td>${esc(useText(h))}${h.reserved ? ' · 창고용' : ''}</td><td class="q">${h.cp}</td><td class="muted">${esc(h.note || '')}</td></tr>`).join('')}</tbody></table>`;
+  // 마을 하나: 일꾼 / 그 일꾼들이 쓰는 투자 노드 / 집
+  const townBlock = (name, cs, inv, hs) => {
+    const kinds = Object.entries(cs.reduce((a, c) => (a[c.kind] = (a[c.kind] || 0) + 1, a), {})).map(([k, n]) => `${k} ${n}`).join('·');
+    const newH = hs.filter(h => !h.reserved), resH = hs.filter(h => h.reserved);
+    const info = [cs.length ? `일꾼 ${cs.length}명${kinds ? ` (${kinds})` : ''}` : '', inv.length ? `노드 ${inv.length}개 ${inv.reduce((a, n) => a + n.cp, 0)} CP` : '',
+      newH.length ? `새 집 ${newH.length}채 ${newH.reduce((a, h) => a + h.cp, 0)} CP` : '', resH.length ? `창고용 ${resH.length}채` : ''].filter(Boolean).join(' · ');
+    return `<div class="town"><h3>${esc(name)} <small>${info}</small></h3>
+      ${cs.length ? workerTable(cs) : ''}
+      ${inv.length ? `<p class="flow"><span class="muted">투자할 노드</span> ${esc(inv.map(n => `${n.name}(${n.cp})`).join(', '))}</p>` : ''}
+      ${hs.length ? houseTable(hs) : ''}</div>`;
+  };
+  const stat = (k, v) => `<div class="stat"><span>${k}</span><b>${v}</b></div>`;
+
+  const summary = `<section class="page">
+    <h1>검은사막 노드 플래너 <small>${today()}</small></h1>
+    <div class="stats">${stat('총 공헌도', total)}${stat('노드', r.node_cp)}${stat(`집 (새로 ${newHouses(r).length}채)`, r.house_cp)}
+      ${resHouses(r).length ? stat(`창고용 집 ${resHouses(r).length}채 (미리 뺌)`, resCp(r)) : ''}${stat('일꾼', r.chosen.length + '명')}
+      ${r.goal === 'max' ? stat('생산 배율', `×${r.scale.toFixed(1)}${r.scale_max - r.scale > 0.05 ? ` ~ ×${r.scale_max.toFixed(1)}` : ''}`) : ''}</div>
+    <p class="quality" style="border-color:${q.color}"><b style="color:${q.color}">${q.label}</b> · ${esc(q.tip)}
+      <span class="muted">(시간 제한 ${timeWord(r.time_limit ?? S.time)}${bc ? ` · 쓸 수 있는 공헌도 ${bc.avail}` : ''})</span></p>
+    <div class="cols">
+      <div><h2>만들 것</h2><table><thead><tr><th>항목</th><th class="q">입력</th><th class="q">가능</th><th>기간</th></tr></thead><tbody>
+        ${r.expansion.map(e => `<tr><td>${esc(e.name)}${e.priority === 'nice' ? ' <span class="muted">(여유)</span>' : ''}</td><td class="q">${fmt(e.crafts)}</td>
+          <td class="q"><b>${e.scale > 1.005 ? fmt(e.crafts * e.scale) : '-'}</b></td><td>${e.days > 1 ? `${fmt(e.days)}일` : '하루'}</td></tr>`).join('')}</tbody></table></div>
+      <div><h2>지역별 요약</h2><table><thead><tr><th>지역</th><th class="q">일꾼</th><th class="q">새 집</th><th class="q">집 CP</th></tr></thead><tbody>
+        ${regions.map(g => { const hs = newHouses(r).filter(h => h.region === g); return `<tr><td>${esc(g)}</td><td class="q">${r.chosen.filter(c => c.region === g).length}</td>
+          <td class="q">${hs.length}</td><td class="q">${hs.reduce((a, h) => a + h.cp, 0)}</td></tr>`; }).join('')}</tbody></table>
+        ${r.imperial ? `<p class="muted">황실 공방 ${r.imperial}명 (육조거리 숙소)</p>` : ''}
+        ${r.extra && r.extra.length ? `<p class="muted">추가 일꾼(농사용 등) ${r.extra.reduce((a, e) => a + e.n, 0)}명: ${esc(r.extra.map(e => `${e.town_name} ${e.n}`).join(', '))}</p>` : ''}</div>
+    </div>
+    ${r.node_sets && r.node_sets.length ? `<h2>노드 종류별 하루 생산</h2><div class="sets">${r.node_sets.map(st => `<div><b>${esc(st.type)}</b> <span class="muted">일꾼 ${st.workers}명</span><br>
+      ${st.items.map(i => `<span class="${i.need ? '' : 'muted'}">${esc(i.name)} ${fmt(i.daily)}</span>`).join(' · ')}</div>`).join('')}</div>` : ''}
+  </section>`;
+
+  const overview = `<section class="page">
+    <h2>전체 지도 <small>번호 = 일꾼 배치 번호 (지역별 쪽에 이름과 함께 나옴)</small></h2>
+    ${reportMap(r, { focus: r.chosen, houses: r.houses.filter(h => !h.owned), H: 600, labels: 'num', fitHouses: true })}
+    ${legend()}
+  </section>`;
+
+  // 지역 지도: 마을들이 가까우면 한 장, 떨어져 있으면 묶음마다 한 장씩 두 단으로 (글자 크기 유지하려고 viewBox 도 반으로)
+  const regionMaps = (cs, hs) => {
+    const cl = cs.length ? townClusters(cs, num) : [[]];
+    if (cl.length === 1) return reportMap(r, { focus: cs, houses: hs, H: 470, labels: 'name' });
+    return `<div class="maps">${cl.sort((a, b) => num.get(a[0]) - num.get(b[0])).map(list => { const ts = [...new Set(list.map(c => c.town_name))];
+      return `<div><div class="maptitle">${esc(ts.join(' · '))}</div>${reportMap(r, { focus: list, houses: hs.filter(h => ts.includes(h.town_name)), W: 490, H: 400, labels: 'name' })}</div>`; }).join('')}</div>`;
+  };
+  const regionPages = regions.map(g => {
+    const cs = r.chosen.filter(c => c.region === g), hs = r.houses.filter(h => h.region === g && !h.owned);
+    const inv = r.invested.filter(n => nodeRegion.get(n.k) === g);
+    return `<section class="page">
+      <h2>${esc(g)} <small>일꾼 ${cs.length}명 · 투자 노드 ${inv.length}개 ${inv.reduce((a, n) => a + n.cp, 0)} CP · 새로 살 집 ${hs.filter(h => !h.reserved).length}채</small></h2>
+      ${regionMaps(cs, hs)}
+      ${legend()}
+      ${[...new Set([...cs.map(c => c.town_name), ...hs.map(h => h.town_name)])].sort((a, b) => ord(META.town_order, a) - ord(META.town_order, b)).map(t => townBlock(t, cs.filter(c => c.town_name === t),
+        inv.filter(n => nodeOwner.get(n.k).town_name === t), hs.filter(h => h.town_name === t))).join('')}
+    </section>`;
+  }).join('');
+
+  // 재료 표: 부족한 것부터, 두 단으로
+  const slotsSorted = [...r.slots].sort((x, y) => covered(x.got, x.qty - x.nice) - covered(y.got, y.qty - y.nice));
+  const halves = a => a.length > 12 ? [a.slice(0, Math.ceil(a.length / 2)), a.slice(Math.ceil(a.length / 2))] : [a];
+  const mats = `<section class="page">
+    <h2>노드 재료 <small>하루 필요량 / 배치 결과</small></h2>
+    <div class="cols" style="margin-top:0">${halves(slotsSorted).map(part => `<table><thead><tr><th>재료</th><th class="q">필요</th><th class="q">생산</th><th>상태</th></tr></thead><tbody>
+      ${part.map(s => { const ok = covered(s.got, s.qty - s.nice); return `<tr><td>${esc(s.label)}</td><td class="q">${fmt(s.qty)}</td><td class="q">${fmt(s.got)}</td>
+        <td style="color:${ok ? '#2f7d4f' : '#b3261e'}">${ok ? '충족' : '부족'}</td></tr>`; }).join('')}</tbody></table>`).join('')}</div>
+    ${r.others.length ? `<h3>노드 말고 따로 구할 것</h3><p class="flow">${esc(r.others.map(o => `${o.label} ${fmt(o.qty)} (${o.reason})`).join(', '))}</p>` : ''}
+    <h2 style="margin-top:18px">완성품별 모아야 할 원재료</h2>
+    <div class="cols">${r.expansion.filter(e => e.tree && e.tree.length).map(e => { const sc = e.scale > 1.005 ? e.scale : 1; return `<div class="keep"><h3>${esc(e.name)} ×${fmt(e.crafts * sc)}</h3>
+      <table><tbody>${treeTotals(e.tree).map(([l, v]) => `<tr><td>${esc(l)}</td><td class="muted">${esc(v.how)}</td><td class="q">${fmt(v.qty * sc)}</td></tr>`).join('')}</tbody></table></div>`; }).join('')}</div>
+  </section>`;
+
+  return `<!doctype html><html lang="ko"><head><meta charset="utf-8"><title>노드 플래너 보고서 ${today()}</title>
+  <style>
+    @page { size: A4 landscape; margin: 10mm; }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #e9e7e2; color: ${RP.ink}; font: 12px/1.45 Pretendard, "Malgun Gothic", sans-serif; }
+    .toolbar { position: sticky; top: 0; z-index: 2; display: flex; gap: 12px; align-items: center; padding: 10px 16px; background: #fff; border-bottom: 1px solid ${RP.line}; }
+    .toolbar button { font: inherit; font-weight: 700; padding: 8px 18px; border-radius: 8px; border: 0; background: ${RP.accent}; color: #fff; cursor: pointer; }
+    .page { width: 297mm; min-height: 210mm; margin: 14px auto; padding: 10mm; background: #fff; box-shadow: 0 2px 10px rgba(0,0,0,.12); break-after: page; }
+    .page:last-child { break-after: auto; }
+    h1 { font-size: 22px; margin: 0 0 12px; } h1 small, h2 small { font-size: 12px; font-weight: 400; color: ${RP.muted}; margin-left: 8px; }
+    h2 { font-size: 16px; margin: 0 0 8px; } h3 { font-size: 13px; margin: 12px 0 4px; }
+    .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px; }
+    .stat { border: 1px solid ${RP.line}; border-radius: 8px; padding: 8px 10px; } .stat span { display: block; color: ${RP.muted}; font-size: 11px; } .stat b { font-size: 20px; }
+    .stat:first-child b { color: ${RP.accent}; }
+    .quality { border: 1px solid; border-radius: 8px; padding: 8px 10px; margin: 10px 0; }
+    .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 18px; margin-top: 10px; }
+    .sets { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px 14px; }
+    table { width: 100%; border-collapse: collapse; } th, td { text-align: left; padding: 3px 6px; border-bottom: 1px solid ${RP.line}; vertical-align: top; }
+    th { font-size: 11px; color: ${RP.muted}; font-weight: 600; } td.q, th.q { text-align: right; white-space: nowrap; } td.n { color: ${RP.accent}; font-weight: 700; width: 28px; }
+    tr { break-inside: avoid; }
+    .maps { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; } .maptitle { font-weight: 700; font-size: 12px; margin: 0 0 3px; }
+    .town { margin-top: 12px; padding-top: 2px; border-top: 2px solid ${RP.line}; } .town h3 { margin: 6px 0 4px; font-size: 14px; } .town h3 small { font-weight: 400; color: ${RP.muted}; margin-left: 6px; font-size: 11px; }
+    .town table + table, .town .flow + table { margin-top: 6px; } .town .flow { margin: 4px 6px; } .keep { break-inside: avoid; } .muted { color: ${RP.muted}; } .flow { margin: 0; }
+    .legend { display: flex; gap: 16px; flex-wrap: wrap; margin-top: 6px; color: ${RP.muted}; font-size: 11px; } .legend i { display: inline-block; vertical-align: -1px; margin-right: 4px; }
+    @media print { body { background: #fff; } .toolbar { display: none; } .page { width: auto; min-height: 0; margin: 0; padding: 0; box-shadow: none; } }
+  </style></head><body>
+  <div class="toolbar"><button onclick="print()">PDF로 저장 / 인쇄</button>
+    <span class="muted">인쇄 창에서 대상을 <b>PDF로 저장</b>으로 고르세요. 지도는 벡터라 PDF를 확대해도 선명합니다.</span></div>
+  ${summary}${overview}${regionPages}${mats}</body></html>`;
+}
+function legend() {
+  const d = (c, sq) => sq ? `<i style="width:9px;height:9px;background:${c}"></i>` : `<i style="width:10px;height:10px;border-radius:50%;background:${c}"></i>`;
+  return `<div class="legend"><span>${d(RP.ink)}일꾼 마을</span><span>${d(RP.accent)}일꾼 노드</span><span><i style="width:6px;height:6px;border-radius:50%;background:${RP.accent}"></i>경유 투자 노드</span>
+    <span>${d(RP.accent, 1)}살 집</span><span><i style="width:16px;height:3px;background:${RP.accent}"></i>일꾼 경로</span></div>`;
+}
+function openReport(r) {
+  const w = window.open('', '_blank');
+  if (!w) { exMsg('팝업이 막혀 있습니다. 이 사이트의 팝업을 허용해 주세요'); return; }
+  w.document.open(); w.document.write(reportHtml(r)); w.document.close();
+  exMsg('보고서를 새 창에 열었습니다');
+}
+
+function exportPng(r) {
+  // 화면 지도를 복사하지 않고 캔버스에 직접 그림: 위에는 지금 보이는 지도 영역, 아래에는 요약·일꾼·노드·집 목록
+  const svg = $('#map'), view = VIEW || PLANBOX; if (!svg || !view) return;
+  const css = getComputedStyle(document.documentElement), C = v => css.getPropertyValue(v).trim();
+  const M = META.map, nb = nodeByKey(), X = n => n.x, Y = n => -n.z;
+  // 화면에 실제로 보이는 영역 (viewBox 를 지도 상자 비율에 맞게 넓힌 것). 블럭이 접혀 지도 크기가 0이면 기본 비율
+  const aspect = svg.clientWidth ? svg.clientHeight / svg.clientWidth : 0.6;
+  let [vx, vy, vw, vh] = view;
+  if (vh / vw < aspect) { const nh = vw * aspect; vy -= (nh - vh) / 2; vh = nh; } else { const nw = vh / aspect; vx -= (nw - vw) / 2; vw = nw; }
+  const W = 2000, MH = Math.round(W * aspect), PAD = 48, s = W / vw;
+  const px = n => (X(n) - vx) * s, py = n => (Y(n) - vy) * s;
+
+  // 아래 정보 영역 글 (줄바꿈 계산을 위해 먼저 만들어 둠)
+  const total = r.node_cp + r.house_cp, buy = r.houses.filter(h => !h.owned);
+  const blocks = [
+    { title: `검은사막 노드 플래너 · ${today()}`, size: 40, bold: true, lines: [`총 공헌도 ${total} (노드 ${r.node_cp} + 집 ${r.house_cp})${resText(r)} · 일꾼 ${r.chosen.length}명`] },
+    { title: '만들 것', lines: r.expansion.map(e => `${e.name} ×${e.crafts}${e.scale > 1.005 ? ` → ${fmt(e.crafts * e.scale)} 가능` : ''}${e.days > 1 ? ` / ${fmt(e.days)}일` : ' / 하루'}${e.priority === 'nice' ? ' (여유)' : ''}`) },
+    { title: `일꾼 배치 (${r.chosen.length}명)`, lines: r.chosen.map(c => `[${c.region}] ${c.town_name} ${c.kind} → ${c.zone_name}  ·  ${c.yields.map(y => `${y.label} ${fmt(y.daily)}/일`).join(', ')}`) },
+    ...(r.imperial ? [{ title: `황실 공방 ${r.imperial}명`, lines: ['육조거리 숙소'] }] : []),
+    ...(r.extra && r.extra.length ? [{ title: `추가 일꾼 (농사용 등) ${r.extra.reduce((a, e) => a + e.n, 0)}명`, lines: [r.extra.map(e => `${e.town_name} ${e.n}`).join(', ')] }] : []),
+    ...(r.node_sets || []).map(st => ({ title: `${st.type} · 일꾼 ${st.workers}명`, lines: [st.items.map(i => `${i.name} ${fmt(i.daily)}`).join(', ')] })),
+    { title: `투자할 노드 (${r.invested.length}개 · ${r.node_cp} CP)`, lines: [r.invested.map(n => `${n.name}(${n.cp})`).join(', ') || '없음'] },
+    { title: `구매할 집 (새로 ${newHouses(r).length}채 · ${r.house_cp} CP${resText(r)})`, lines: buy.length ? buy.map(h => `[${h.region}] ${h.town_name} · ${h.name} · ${useText(h)} · ${h.cp}CP${h.reserved ? ' (창고용)' : ''}${h.note ? ` · ${h.note}` : ''}`) : ['없음'] },
+  ];
+  const c = document.createElement('canvas'), g = c.getContext('2d');
+  const font = (sz, bold) => `${bold ? '700 ' : ''}${sz}px "Pretendard","Malgun Gothic",sans-serif`;
+  const wrap = (text, sz, maxW) => {  // 글자 단위 줄바꿈 (한글은 띄어쓰기가 없어도 됨)
+    g.font = font(sz); const out = []; let line = '';
+    for (const ch of text) { if (g.measureText(line + ch).width > maxW && line) { out.push(line); line = ch.trimStart(); } else line += ch; }
+    if (line) out.push(line); return out;
+  };
+  const BODY = 26, LH = 38, maxW = W - PAD * 2;
+  let infoH = PAD;
+  blocks.forEach(b => { infoH += (b.size || 30) + 16; b.wrapped = b.lines.flatMap(t => wrap(t, BODY, maxW)); infoH += b.wrapped.length * LH + 28; });
+  c.width = W; c.height = MH + infoH;
+
+  // 지도
+  g.fillStyle = C('--map-bg'); g.fillRect(0, 0, W, MH);
+  g.lineCap = 'round';
+  g.strokeStyle = C('--map-edge'); g.lineWidth = 2;
+  g.beginPath(); M.edges.forEach(([a, b]) => { const A = nb[a], B = nb[b]; if (A && B) { g.moveTo(px(A), py(A)); g.lineTo(px(B), py(B)); } }); g.stroke();
+  const invested = new Set(r.invested.map(n => n.k)), owned = new Set(S.owned);
+  const towns = new Set(r.chosen.map(ch => META.towns.find(t => t.tk === ch.town)?.wp)), zones = new Set(r.chosen.map(ch => ch.zone));
+  g.strokeStyle = C('--accent'); g.lineWidth = 6;
+  g.beginPath(); r.chosen.forEach(ch => ch.route.forEach((k, i) => { if (!i) return; const A = nb[ch.route[i - 1]], B = nb[k]; if (A && B) { g.moveTo(px(A), py(A)); g.lineTo(px(B), py(B)); } })); g.stroke();
+  const dot = (n, rad, fill, ring) => { g.beginPath(); g.arc(px(n), py(n), rad, 0, Math.PI * 2); g.fillStyle = fill; g.fill(); if (ring) { g.lineWidth = 3; g.strokeStyle = ring; g.stroke(); } };
+  M.nodes.forEach(n => { if (!zones.has(n.k) && !towns.has(n.k) && !invested.has(n.k) && !owned.has(n.k)) dot(n, 3, C('--map-node')); });
+  M.nodes.forEach(n => { if (owned.has(n.k) && !invested.has(n.k)) dot(n, 6, C('--owned')); });
+  M.nodes.forEach(n => { if (invested.has(n.k) && !zones.has(n.k)) dot(n, 6, C('--accent')); });
+  M.nodes.forEach(n => { if (zones.has(n.k)) dot(n, 10, C('--accent'), C('--map-bg')); });
+  M.nodes.forEach(n => { if (towns.has(n.k)) dot(n, 10, C('--ink'), C('--map-bg')); });
+  r.houses.forEach(h => { const x = (h.pos[0] - vx) * s, y = (-h.pos[1] - vy) * s; g.fillStyle = h.owned ? C('--owned') : C('--accent'); g.fillRect(x - 7, y - 7, 14, 14); });
+  // 지도 위 노드 이름은 넣지 않음 (겹쳐서 가림) — 이름은 아래 목록에
+
+  // 정보
+  g.fillStyle = C('--panel'); g.fillRect(0, MH, W, infoH);
+  g.fillStyle = C('--line'); g.fillRect(0, MH, W, 2);
+  let y = MH + PAD;
+  blocks.forEach(b => {
+    const sz = b.size || 30; g.font = font(sz, true); g.fillStyle = b.size ? C('--accent') : C('--ink');
+    g.fillText(b.title, PAD, y + sz * 0.85); y += sz + 16;
+    g.font = font(BODY); g.fillStyle = C('--muted');
+    b.wrapped.forEach(t => { g.fillText(t, PAD, y + BODY * 0.85); y += LH; });
+    y += 28;
+  });
+  c.toBlob(b => { download(`노드플래너_${today()}.png`, b); exMsg('지도 + 목록 이미지를 저장했습니다'); });
+}
+// 생산량 최대: 항목마다 따로 늘림. 남은 공헌도가 있으면 노드가 바닥난 것, 없으면 예산을 다 쓴 것
+function scaleNote(r) {
+  if (r.goal_req === 'max' && r.goal !== 'max')
+    return `<p class="hint">공헌도 최소로 계산했습니다. 생산량 최대로 하려면 설정에서 <b>총 공헌도</b>를 넣으세요.</p>`;
+  if (r.goal !== 'max') return '';
+  const grown = r.expansion.filter(e => e.scale !== undefined);
+  const bc = budgetCalc(), left = bc ? bc.avail - (r.node_cp + r.house_cp) : 0;
+  const must = r.slots.filter(s => s.qty - s.nice > 0);
+  const tight = must.length ? must.reduce((x, y) => (y.got / y.qty < x.got / x.qty ? y : x)) : null;
+  return `<div class="panel" style="margin-top:12px"><h2>항목별 생산량 <small>입력 수량 → 가능 수량</small></h2>
+    <div class="nodelist">${grown.map(e => `<span class="chip" style="padding-right:10px">${esc(e.name)} <small>${e.crafts} →</small> <b>${fmt(e.crafts * e.scale)}</b> <small>×${e.scale.toFixed(1)}</small></span>`).join('')}</div>
+    <p class="hint">${left > 2 ? `공헌도가 ${left} 남았지만 더 늘릴 노드가 없습니다${tight ? ` (가장 빠듯한 재료: <b>${esc(tight.label)}</b>)` : ''}.` : '공헌도 예산을 거의 다 썼습니다.'}
+      덜 늘어난 항목부터 키워서 한쪽으로 쏠리지 않게 했습니다.</p></div>`;
+}
+// 레시피 전개: 완성품마다 하위 재료 전체 (입력 수량 기준 + 생산량 최대면 가능 수량 기준)
+const treeTotals = tree => {
+  const t = {};
+  tree.forEach((x, i) => { const leaf = !(tree[i + 1] && tree[i + 1].depth > x.depth); if (leaf) t[x.label] = { qty: (t[x.label]?.qty || 0) + x.qty, how: x.how }; });
+  return Object.entries(t).sort((a, b) => b[1].qty - a[1].qty);
+};
+function expansionHtml(r) {
+  if (!r.expansion.length) return '<div class="empty">펼칠 항목이 없습니다.</div>';
+  // 항목이 많으면 바로가기 (탭 줄 아래에 붙어 있음)
+  const jump = r.expansion.length > 1 ? `<nav class="jump">${r.expansion.map((e, i) => `<a href="#exp-${i}">${esc(e.name.replace(' (직접 입력)', ''))}</a>`).join('')}</nav>` : '';
+  return jump + r.expansion.map((e, idx) => {
+    const sc = e.scale !== undefined && e.scale > 1.005 ? e.scale : null, tree = e.tree || [];
+    const qcols = sc ? `<th class="q">${fmt(e.crafts)}회</th><th class="q">${fmt(e.crafts * sc)}회 (가능)</th>` : `<th class="q">${fmt(e.crafts)}회</th>`;
+    const qv = q => sc ? `<td class="q">${fmt(q)}</td><td class="q"><b>${fmt(q * sc)}</b></td>` : `<td class="q"><b>${fmt(q)}</b></td>`;
+    const howTag = h => `<span class="how ${h === '노드' ? 'node' : ''}">${esc(h)}</span>`;
+    return `<div class="panel" id="exp-${idx}" style="margin-top:12px;scroll-margin-top:120px">
+      <h2>${esc(e.name)} <small>× ${e.crafts}${sc ? ` → <b style="color:var(--accent)">${fmt(e.crafts * sc)}</b> 가능` : ''}${e.days > 1 ? ` / ${fmt(e.days)}일` : ' / 하루'}${e.priority === 'nice' ? ' · 여유' : ''}</small></h2>
+      ${e.bottleneck ? `<p class="hint" style="margin:0 0 8px;color:var(--accent)">병목: <b>${esc(e.bottleneck.label)}</b> — 노드를 다 돌려도 하루 최대 ${fmt(e.bottleneck.per_day)}개 (1개 만드는 데 ${fmt(e.bottleneck.per_unit)}개 필요) → <b>약 ${fmt(e.bottleneck.days)}일</b> 기준으로 계산</p>` : ''}
+      ${tree.length ? `<div class="grid2" style="margin-top:0">
+        <div><b style="font-size:13px">하위 재료 전체</b>
+          <div class="tablewrap"><table class="tree"><thead><tr><th>재료</th><th>얻는 법</th>${qcols}</tr></thead><tbody>
+          ${tree.map((x, i) => `<tr class="${tree[i + 1] && tree[i + 1].depth > x.depth ? '' : 'leaf'}">
+            <td style="padding-left:${6 + x.depth * 16}px">${x.depth ? '└ ' : ''}${esc(x.label)}</td><td>${howTag(x.how)}</td>${qv(x.qty)}</tr>`).join('')}
+          </tbody></table></div></div>
+        <div><b style="font-size:13px">모아야 할 원재료 합계</b>
+          <div class="tablewrap"><table class="tree"><thead><tr><th>재료</th><th>얻는 법</th>${qcols}</tr></thead><tbody>
+          ${treeTotals(tree).map(([l, v]) => `<tr class="leaf"><td>${esc(l)}</td><td>${howTag(v.how)}</td>${qv(v.qty)}</tr>`).join('')}
+          </tbody></table></div></div>
+      </div>` : `<div class="mats">${esc(e.mats.join(' + '))}</div>`}
+    </div>`;
+  }).join('') + '<p class="hint">수량은 기간 전체 합계입니다. 요리·연금 1회 = 결과 1개, 가공(빻기·말리기 등)은 결과 범위의 중간값(예: 1~4개 → 2.5개)으로 계산합니다.</p>';
+}
+function othersHtml(r) {
+  if (!r.others.length) return '';
+  const groups = {};
+  r.others.forEach(o => (groups[o.reason] = groups[o.reason] || []).push(o));
+  const desc = { '구매': '상점에서 삼', '재배': '텃밭에서 기름', '따로 모음': '병목 재료 — 되는 만큼 차근차근', '노드 없음': '노드·레시피로 못 구함 (채집·사냥·교환 등)' };
+  return `<div class="panel" style="margin-top:12px"><b>노드 계산에서 빠진 재료</b> <small>${r.days > 1 ? '하루 몫' : '하루치'} · 옆 선택으로 노드 계산에 다시 넣을 수 있음</small>
+    ${Object.entries(groups).map(([why, list]) => `<div style="margin-top:8px"><small><b>${esc(why)}</b> · ${esc(desc[why] || '')}</small>
+      <div class="nodelist" style="margin-top:4px">${list.map(o => `<span class="chip" style="padding-right:6px">${esc(o.label)} <small>×${fmt(o.qty)}</small> ${srcSelect(o.ids, o.mode)}</span>`).join('')}</div></div>`).join('')}
+  </div>`;
+}
+
+// ---------- 지도 ----------
+let VIEW = null, FULL = null, PLANBOX = null;
+function drawMap(r) {
+  const svg = $('#map'), M = META.map, nb = nodeByKey();
+  const invested = new Set(r.invested.map(n => n.k)), owned = new Set(S.owned);
+  const towns = new Set(r.chosen.map(c => META.towns.find(t => t.tk === c.town)?.wp));
+  const zones = new Set(r.chosen.map(c => c.zone));
+  const routeEdges = new Set(), planNodes = new Set();
+  r.chosen.forEach(c => { c.route.forEach((k, i) => { planNodes.add(k); if (i) routeEdges.add([Math.min(k, c.route[i - 1]), Math.max(k, c.route[i - 1])].join('-')); }); });
+  const X = n => n.x, Y = n => -n.z;
+  const xs = M.nodes.map(X), ys = M.nodes.map(Y);
+  FULL = [Math.min(...xs), Math.min(...ys), Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys)];
+  const pn = [...planNodes].map(k => nb[k]).filter(Boolean);
+  PLANBOX = pn.length ? padBox([Math.min(...pn.map(X)), Math.min(...pn.map(Y)), Math.max(...pn.map(X)), Math.max(...pn.map(Y))]) : FULL;
+  const u = FULL[2] / 900; // 기본 크기 단위
+  let html = `<g class="edges" stroke="var(--map-edge)">`;
+  M.edges.forEach(([a, b]) => { const A = nb[a], B = nb[b]; if (A && B) html += `<line x1="${X(A)}" y1="${Y(A)}" x2="${X(B)}" y2="${Y(B)}"/>`; });
+  html += `</g><g class="route" stroke="var(--accent)" stroke-linecap="round">`;
+  routeEdges.forEach(e => { const [a, b] = e.split('-').map(Number); const A = nb[a], B = nb[b]; if (A && B) html += `<line x1="${X(A)}" y1="${Y(A)}" x2="${X(B)}" y2="${Y(B)}"/>`; });
+  html += `</g><g>`;
+  const sorted = [...M.nodes].sort((a, b) => rank(a) - rank(b));
+  function rank(n) { return zones.has(n.k) ? 4 : towns.has(n.k) ? 3 : invested.has(n.k) ? 2 : owned.has(n.k) ? 1 : 0; }
+  sorted.forEach(n => {
+    const rk = rank(n);
+    const fill = rk === 4 || rk === 2 ? 'var(--accent)' : rk === 3 ? 'var(--ink)' : rk === 1 ? 'var(--owned)' : 'var(--map-node)';
+    const rad = (rk === 4 ? 5 : rk === 3 ? 5 : rk ? 3.5 : 2) * u;
+    html += `<circle class="nd" data-r="${rad / u}" cx="${X(n)}" cy="${Y(n)}" r="${rad}" fill="${fill}" ${rk === 4 ? 'stroke="var(--panel)" stroke-width="1.5" vector-effect="non-scaling-stroke"' : ''}><title>${esc(n.name)} (CP ${n.cp})</title></circle>`;
+  });
+  html += `</g><g class="houses">`;
+  r.houses.forEach(h => {
+    const fill = h.owned ? 'var(--owned)' : 'var(--accent)';
+    html += `<rect class="hs" data-x="${h.pos[0]}" data-y="${-h.pos[1]}" fill="${fill}" stroke="var(--panel)"><title>${esc(h.name)} — ${h.use}${h.owned ? ' (보유)' : ''}</title></rect>`;
+  });
+  html += `</g><g class="labels" fill="var(--ink)" paint-order="stroke" stroke="var(--map-bg)" stroke-linejoin="round">`;
+  M.nodes.filter(n => zones.has(n.k) || towns.has(n.k)).forEach(n => {
+    html += `<text class="lb" data-x="${X(n)}" data-y="${Y(n)}">${esc(n.name)}</text>`;
+  });
+  html += `</g>`;
+  svg.innerHTML = html;
+  setView(PLANBOX);
+  $('#fitPlan').onclick = () => setView(PLANBOX);
+  $('#fitAll').onclick = () => setView(FULL);
+  const zoom = f => setView([VIEW[0] + VIEW[2] * (1 - f) / 2, VIEW[1] + VIEW[3] * (1 - f) / 2, VIEW[2] * f, VIEW[3] * f]);
+  $('#zoomIn').onclick = () => zoom(1 / 1.4);
+  $('#mapFull').onclick = () => toggleFullMap();
+  $('#zoomOut').onclick = () => zoom(1.4);
+  enablePanZoom(svg);
+}
+function toggleFullMap(force) {
+  const wrap = document.querySelector('.mapwrap'); if (!wrap) return;
+  const open = force !== undefined ? force : !wrap.classList.contains('full');
+  wrap.classList.toggle('full', open);
+  document.querySelector('.map-backdrop')?.remove();
+  if (open) {
+    const bd = document.createElement('div'); bd.className = 'map-backdrop'; bd.onclick = () => toggleFullMap(false);
+    wrap.before(bd);
+  }
+  $('#mapFull').textContent = open ? '✕ 닫기' : '⛶ 크게';
+  document.body.style.overflow = open ? 'hidden' : '';
+  if (PLANBOX) setView(PLANBOX);  // 크기가 바뀌므로 계획 영역에 다시 맞춤
+}
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && document.querySelector('.mapwrap.full')) toggleFullMap(false); });
+let PULSE_TIMER = null;
+function showPulseMap() {
+  const box = $('#resSummary'), M = META.map, nb = nodeByKey();
+  const X = n => n.x, Y = n => -n.z;
+  // 하이델 한 곳에서 시작해 연결선을 따라 퍼져 나가는 단계 (BFS). 여러 마을에서 동시에 시작하면 깜빡임처럼 보임
+  const adj = {};
+  M.edges.forEach(([a, b]) => { (adj[a] = adj[a] || []).push(b); (adj[b] = adj[b] || []).push(a); });
+  const level = {}, queue = [];
+  const origin = (META.towns.find(t => t.name === '하이델') || META.towns[0]).wp;
+  level[origin] = 0; queue.push(origin);
+  for (let i = 0; i < queue.length; i++) {
+    const u = queue[i];
+    (adj[u] || []).forEach(v => { if (level[v] === undefined) { level[v] = level[u] + 1; queue.push(v); } });
+  }
+  // 하이델과 이어지지 않은 섬 등은 가장 바깥 단계로
+  const step = 0.07, maxLv = Math.max(...Object.values(level));
+  const cycle = (maxLv + 1) * step / 0.7;  // 한 번 퍼지는 데 걸리는 시간 + 잠깐 쉼
+  const xs = M.nodes.map(X), ys = M.nodes.map(Y);
+  const view = [Math.min(...xs), Math.min(...ys), Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys)];
+  let base = '', glow = '', dots = '';
+  M.edges.forEach(([a, b]) => {
+    const A = nb[a], B = nb[b]; if (!A || !B) return;
+    base += `<line x1="${X(A)}" y1="${Y(A)}" x2="${X(B)}" y2="${Y(B)}"/>`;
+    const lv = Math.min(level[a] ?? maxLv, level[b] ?? maxLv);
+    glow += `<line x1="${X(A)}" y1="${Y(A)}" x2="${X(B)}" y2="${Y(B)}" style="animation-delay:${(lv * step).toFixed(2)}s"/>`;
+  });
+  M.nodes.forEach(n => {
+    dots += `<circle class="nd" data-r="2" cx="${X(n)}" cy="${Y(n)}" r="0" fill="var(--map-node)"/>`;
+  });
+  const glowDots = M.nodes.map(n => `<circle class="nd" data-r="3" cx="${X(n)}" cy="${Y(n)}" r="0" style="animation-delay:${((level[n.k] ?? maxLv) * step).toFixed(2)}s"/>`).join('');
+  box.innerHTML = `<div class="status" id="pulseStatus" style="margin:0 0 4px">계산 준비 중…</div>
+    <div class="tbar"><i id="pulseBar"></i></div>
+    <p class="hint" style="margin:4px 0 8px">시간 제한(${timeWord(S.time)}) 동안 더 좋은 조합을 계속 찾습니다. 더 나은 답이 없다고 확인되면 일찍 끝납니다.</p>
+    <div class="mapwrap"><svg id="map" style="--cycle:${cycle.toFixed(2)}s">
+      <g class="edges" stroke="var(--map-edge)">${base}</g>
+      <g>${dots}</g>
+      <g class="pulse route" stroke-linecap="round">${glow}</g>
+      <g class="pulse">${glowDots}</g>
+    </svg></div>`;
+  VIEW = null; PLANBOX = null;
+  setView(view);
+  // setView 는 g.route 굵기를 3px 로 맞춤 — 빛 선은 조금 더 굵게
+  const svg = $('#map'), k = Math.max(view[2] / svg.clientWidth, view[3] / svg.clientHeight);
+  svg.querySelector('g.route')?.setAttribute('stroke-width', 2.5 * k);
+  const t0 = Date.now();
+  clearInterval(PULSE_TIMER);
+  PULSE_TIMER = setInterval(() => {
+    const sec = Math.round((Date.now() - t0) / 1000), el = $('#pulseStatus'), bar = $('#pulseBar');
+    if (el) el.textContent = `계산 중… ${sec}초 / 시간 제한 ${S.time}초${sec > S.time ? ' (결과 정리 중)' : ''}`;
+    if (bar) bar.style.width = Math.min(100, sec / S.time * 100) + '%';
+  }, 1000);
+  $('#sumSummary').textContent = '계산 중…';
+}
+function stopPulseMap() { clearInterval(PULSE_TIMER); PULSE_TIMER = null; }
+function padBox([x0, y0, x1, y1]) {
+  const w = Math.max(x1 - x0, 60000), h = Math.max(y1 - y0, 60000), p = 0.15;
+  const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
+  return [cx - w * (0.5 + p), cy - h * (0.5 + p), w * (1 + 2 * p), h * (1 + 2 * p)];
+}
+function setView(v) {
+  VIEW = [...v]; const svg = $('#map');
+  if (!svg) return;
+  svg.setAttribute('viewBox', VIEW.join(' '));
+  if (!svg.clientWidth) return;  // 블럭이 접혀 있음 — 펼칠 때 다시 맞춤
+  // 확대해도 점·글자 크기가 화면에서 일정하도록 (viewBox 는 가로·세로 중 좁은 쪽에 맞춰짐)
+  const k = Math.max(VIEW[2] / svg.clientWidth, VIEW[3] / svg.clientHeight);
+  svg.querySelectorAll('circle.nd').forEach(c => c.setAttribute('r', c.dataset.r * k));
+  const set = (sel, attr, v) => { const el = svg.querySelector(sel); if (el) el.setAttribute(attr, v); };
+  set('g.edges', 'stroke-width', 1 * k);
+  set('g.route', 'stroke-width', 3 * k);
+  set('g.labels', 'font-size', 12 * k);
+  set('g.labels', 'stroke-width', 3 * k);
+  svg.querySelectorAll('rect.hs').forEach(e => { const sz = 7 * k;
+    e.setAttribute('x', +e.dataset.x - sz / 2); e.setAttribute('y', +e.dataset.y - sz / 2);
+    e.setAttribute('width', sz); e.setAttribute('height', sz); e.setAttribute('stroke-width', 1 * k); });
+  svg.querySelectorAll('text.lb').forEach(t => { t.setAttribute('x', +t.dataset.x + 8 * k); t.setAttribute('y', +t.dataset.y + 4 * k); });
+}
+function enablePanZoom(svg) {
+  if (svg.dataset.pz) return; svg.dataset.pz = 1;
+  const toWorld = (e) => { const r = svg.getBoundingClientRect();
+    return [VIEW[0] + (e.clientX - r.left) / r.width * VIEW[2], VIEW[1] + (e.clientY - r.top) / r.height * VIEW[3]]; };
+  // 지도 위에서 휠 = 확대/축소 (사용자 요청. 페이지 스크롤은 지도 밖에서)
+  svg.addEventListener('wheel', e => {
+    e.preventDefault(); const [wx, wy] = toWorld(e); const f = e.deltaY > 0 ? 1.2 : 1 / 1.2;
+    setView([wx - (wx - VIEW[0]) * f, wy - (wy - VIEW[1]) * f, VIEW[2] * f, VIEW[3] * f]);
+  }, { passive: false });
+  let drag = null;
+  svg.addEventListener('pointerdown', e => { drag = { x: e.clientX, y: e.clientY, v: [...VIEW] }; svg.setPointerCapture(e.pointerId); });
+  svg.addEventListener('pointermove', e => {
+    if (!drag) return; const r = svg.getBoundingClientRect();
+    const dx = (e.clientX - drag.x) / r.width * drag.v[2], dy = (e.clientY - drag.y) / r.height * drag.v[3];
+    setView([drag.v[0] - dx, drag.v[1] - dy, drag.v[2], drag.v[3]]);
+  });
+  svg.addEventListener('pointerup', () => drag = null);
+  svg.addEventListener('dblclick', () => toggleFullMap());
+}
+
+// ---------- 시작 ----------
+(async () => {
+  // 결과는 저장하지 않으니, 새로 열면 결과 탭 대신 '만들 것'부터
+  showTab(['blk-input', 'blk-settings'].includes(S.tab) ? S.tab : 'blk-input', false);
+  try { META = await apiGet('/api/meta'); }
+  catch (err) { $('#runError').innerHTML = `<div class="error">${STATIC ? esc(err.message || '') + ' — ' + NO_ENGINE : '서버에 연결할 수 없습니다. server.py를 실행하세요.'}</div>`; return; }
+  $('#recipeCount').textContent = `${META.recipes.length}종`;
+  $('#bedTown').innerHTML = META.towns.map(t => `<option value="${t.tk}">${esc(t.name)}</option>`).join('');
+  const recipePids = new Set(META.recipes.map(r => r.pid));
+  attachSearch($('#recipeSearch'), $('#recipeSuggest'),
+    async q => {
+      const rs = META.recipes.filter(r => match(r.name, q)).map(r => ({ label: r.name, sub: r.kind, r }));
+      const more = (await searchItems(q)).filter(m => !recipePids.has(m.id) && m.how !== '노드 생산')
+        .map(m => ({ label: m.name, sub: `${howLabel(m.how)} · 재료로 추가`, m }));
+      const rank = x => (x.label === q ? 0 : x.label.startsWith(q) ? 1 : 2);
+      return [...rs, ...more].sort((a, b) => rank(a) - rank(b) || a.label.length - b.label.length);
+    },
+    it => {
+      if (it.r && !S.products.some(p => p.pid === it.r.pid)) { S.products.push({ pid: it.r.pid, crafts: 10, variant: 0, days: S.days, priority: 'must' }); renderProducts(); }
+      if (it.m && !S.materials.some(m => m.id === it.m.id)) { S.materials.push({ id: it.m.id, name: it.m.name, qty: 10, days: S.days, priority: 'must' }); renderMaterials(); }
+      save();
+    });
+  attachSearch($('#matSearch'), $('#matSuggest'),
+    async q => (await searchItems(q)).map(m => ({ label: m.name, sub: howLabel(m.how), m })),
+    it => { if (!S.materials.some(m => m.id === it.m.id)) S.materials.push({ id: it.m.id, name: it.m.name, qty: 100, days: S.days, priority: 'must' }); save(); renderMaterials(); });
+  attachSearch($('#ownedSearch'), $('#ownedSuggest'),
+    q => META.map.nodes.filter(n => n.cp > 0 && match(n.name, q) && !S.owned.includes(n.k)).sort((a, b) => a.name.length - b.name.length).map(n => ({ label: n.name, sub: `CP ${n.cp}`, n })),
+    it => { S.owned.push(it.n.k); save(); renderSettings(); });
+  attachSearch($('#houseSearch'), $('#houseSuggest'),
+    q => META.houses.filter(h => !S.owned_houses.includes(h.k) && (match(h.name, q) || match(h.town + ' ' + h.name, q)))
+      .sort((a, b) => a.name.length - b.name.length)
+      .map(h => ({ label: h.name, sub: `${h.town} · ${h.cp}CP · 숙소 ${h.beds} · 창고 ${h.slots}`, h })),
+    it => { S.owned_houses.push(it.h.k); save(); renderSettings(); });
+  attachSearch($('#edProductSearch'), $('#edProductSuggest'),
+    async q => (await searchItems(q)).map(m => ({ label: m.name, sub: howLabel(m.how), m })),
+    it => { ED.product = { id: it.m.id, name: it.m.name }; renderEditor(); });
+  attachSearch($('#edInputSearch'), $('#edInputSuggest'),
+    async q => (await searchItems(q)).map(m => ({ label: m.name, sub: howLabel(m.how), m })),
+    it => { if (!ED.inputs.some(x => x.id === it.m.id)) ED.inputs.push({ id: it.m.id, name: it.m.name, qty: 1 }); renderEditor(); });
+  renderDays(); renderProducts(); renderMaterials(); renderSettings();
+})();
+</script>
+</body>
+</html>

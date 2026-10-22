@@ -1,0 +1,11 @@
+.venv/
+__pycache__/
+*.tmp
+# 원본 스크랩(150MB+) — update.bat 이 다시 받음. 사이트에는 data/build 와 data/*.json 만 필요
+data/raw/
+# CI(.github/workflows/pages.yml)가 만듦
+site/
+# 개인 자료 (저장소에 올리지 않음)
+노드 플래너.pdf
+# 작업 기록 (개인용, 공개 저장소에 올리지 않음 — 사용자 결정 2026-10-22)
+NOTES.md
