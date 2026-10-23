@@ -243,6 +243,10 @@ main.tabbed .block.collapsed .bbody { display: block; }
         <button class="primary" id="runBtn">계산하기</button>
       </div>
       <div id="runError"></div>
+      <div class="panel" style="margin-top:12px">
+        <h2>지난 계산 <small>이 브라우저에만 저장 · 최근 30개</small></h2>
+        <div id="histList"><p class="hint">계산하면 여기에 남습니다.</p></div>
+      </div>
     </div>
   </section>
 
@@ -855,10 +859,71 @@ $('#runBtn').onclick = async () => {
         stock: S.stock, stock_days: S.stock_days, hand: S.hand });
     if (!res.ok) throw new Error(res.data && res.data.error || `서버 오류 ${res.status}`);
     LAST = res.data; LAST.days = S.days; LAST.time_limit = S.time; renderResults(LAST);
+    histSave(LAST);
   } catch (err) {
     $('#runError').innerHTML = $('#resSummary').innerHTML = `<div class="error">${esc(err.message)} — ${NO_ENGINE}</div>`;
   } finally { clearInterval(liveTimer); btn.disabled = tb.disabled = false; btn.textContent = tb.textContent = '계산하기'; stopPulseMap(); }
 };
+// ---------- 지난 계산 (이 브라우저의 IndexedDB, 최근 HIST_MAX 개) ----------
+const HIST_MAX = 30;
+// '입력 불러오기'로 되돌릴 설정 (탭·접힘·테마 같은 화면 상태는 빼고)
+const HIST_KEYS = ['products', 'materials', 'days', 'time', 'goal', 'cp_total', 'cp_rent', 'cp_other', 'owned', 'owned_houses', 'beds',
+  'storage', 'value_pack', 'workers', 'sourcing', 'resource_pct', 'lodge_eff_min', 'extra_workers', 'imperial_workers', 'stock', 'stock_days', 'hand'];
+let HIST = [];
+function histStore(mode, fn) {
+  return new Promise((resolve, reject) => {
+    const open = indexedDB.open('bdo-planner', 1);
+    open.onupgradeneeded = () => open.result.createObjectStore('history', { keyPath: 'id' });
+    open.onerror = () => reject(open.error);
+    open.onsuccess = () => {
+      const tx = open.result.transaction('history', mode), req = fn(tx.objectStore('history'));
+      tx.oncomplete = () => { open.result.close(); resolve(req && req.result); };
+      tx.onerror = () => { open.result.close(); reject(tx.error); };
+    };
+  });
+}
+async function histSave(r) {
+  try {
+    const entry = { id: Date.now(), title: r.expansion.map(e => `${e.name.replace(' (직접 입력)', '')} ${e.crafts}`).join(', '),
+      input: JSON.parse(JSON.stringify(Object.fromEntries(HIST_KEYS.map(k => [k, S[k]])))),
+      result: JSON.parse(JSON.stringify(r)),
+      sum: { cp: r.node_cp + r.house_cp, workers: r.chosen.length, scale: r.scale, goal: r.goal, short: r.slots.filter(s => !s.hand && !covered(s.got, s.qty - s.nice)).length } };
+    await histStore('readwrite', st => st.put(entry));
+    const old = (await histStore('readonly', st => st.getAllKeys())).sort((a, b) => b - a).slice(HIST_MAX);
+    if (old.length) await histStore('readwrite', st => { old.forEach(k => st.delete(k)); });
+  } catch { /* 저장 불가(사생활 보호 모드 등) — 기록 없이 계속 */ }
+  renderHistory();
+}
+async function renderHistory() {
+  try { HIST = ((await histStore('readonly', st => st.getAll())) || []).sort((a, b) => b.id - a.id); } catch { HIST = []; }
+  const el = $('#histList');
+  if (!HIST.length) { el.innerHTML = '<p class="hint">계산하면 여기에 남습니다.</p>'; return; }
+  const when = id => { const d = new Date(id); return `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
+  el.innerHTML = HIST.map(h => `<div class="slot"><div class="slot-head">
+      <span><small style="color:var(--muted)">${when(h.id)}</small> ${esc(h.title.length > 70 ? h.title.slice(0, 70) + '…' : h.title)}</span>
+      <span style="white-space:nowrap;font-size:12px"><button class="link histView" data-id="${h.id}">결과 보기</button> · <button class="link histLoad" data-id="${h.id}">입력 불러오기</button> · <button class="link histDel" data-id="${h.id}" title="삭제">✕</button></span></div>
+      <div class="slot-items">공헌도 ${h.sum.cp} · 일꾼 ${h.sum.workers}명${h.sum.goal === 'max' ? ` · 배율 ×${(+h.sum.scale).toFixed(2)}` : ''}${h.sum.short ? ` · 부족 ${h.sum.short}종` : ''}</div></div>`).join('')
+    + `<p class="hint" style="margin:8px 0 0"><button class="link" id="histClear">기록 모두 지우기</button></p>`;
+}
+document.addEventListener('click', async e => {
+  const t = e.target, h = t.dataset && HIST.find(x => String(x.id) === t.dataset.id);
+  if (t.classList.contains('histView') && h) {
+    try { LAST = h.result; renderResults(LAST); showTab('blk-summary'); }
+    catch { $('#runError').innerHTML = '<div class="error">예전 버전에서 저장한 결과라 그릴 수 없습니다. “입력 불러오기” 후 다시 계산하세요.</div>'; }
+  } else if (t.classList.contains('histLoad') && h) {
+    Object.assign(S, JSON.parse(JSON.stringify(h.input)));
+    S.mat_list = null; save();
+    renderDays(); renderProducts(); renderMaterials(); renderSettings();
+    $('#runBtn').textContent = '계산하기 (불러온 입력)';
+  } else if (t.classList.contains('histDel') && h) {
+    try { await histStore('readwrite', st => { st.delete(h.id); }); } catch {}
+    renderHistory();
+  } else if (t.id === 'histClear') {
+    try { await histStore('readwrite', st => { st.clear(); }); } catch {}
+    renderHistory();
+  }
+});
+
 // 계산 중: 지금까지 찾은 최선의 답 (숫자 + 지도에 고른 노드)
 function renderLive(d) {
   const el = $('#liveBest'), g = $('#liveMap'), svg = $('#map');
@@ -1655,7 +1720,7 @@ function enablePanZoom(svg) {
 
 // ---------- 시작 ----------
 (async () => {
-  // 결과는 저장하지 않으니, 새로 열면 결과 탭 대신 '만들 것'부터
+  // 새로 열면 결과 탭 대신 '만들 것'부터 (지난 결과는 '지난 계산'에서 다시 볼 수 있음)
   showTab(['blk-input', 'blk-settings'].includes(S.tab) ? S.tab : 'blk-input', false);
   try { META = await apiGet('/api/meta'); }
   catch (err) { $('#runError').innerHTML = `<div class="error">${STATIC ? esc(err.message || '') + ' — ' + NO_ENGINE : '서버에 연결할 수 없습니다. server.py를 실행하세요.'}</div>`; return; }
@@ -1692,7 +1757,7 @@ function enablePanZoom(svg) {
   attachSearch($('#edInputSearch'), $('#edInputSuggest'),
     async q => (await searchItems(q)).map(m => ({ label: m.name, sub: howLabel(m.how), m })),
     it => { if (!ED.inputs.some(x => x.id === it.m.id)) ED.inputs.push({ id: it.m.id, name: it.m.name, qty: 1 }); renderEditor(); });
-  renderDays(); renderProducts(); renderMaterials(); renderSettings();
+  renderDays(); renderProducts(); renderMaterials(); renderSettings(); renderHistory();
 })();
 </script>
 </body>
