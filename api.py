@@ -209,6 +209,47 @@ NODE_TYPES = ["채광", "벌목", "채집", "발굴", "재배", "건조장", "�
 TYPE_KO = {"건조장": "어업 (생선 건조장)", "생산": "축산 (닭고기·벌꿀 등)", "재배": "재배 (농장)"}
 
 
+# 재료 분류 (화면 목록 묶음용). 이름 규칙 → 주로 나오는 노드 종류 순으로 정함
+CATS = ["약초류", "버섯류", "곡물류", "재배 작물", "수액류", "원목류", "벌목 부산물", "광석류", "원석류", "가루류",
+        "발굴품", "수산물", "축산물", "기타"]
+GRAINS = ("감자", "고구마", "밀", "보리", "쌀", "옥수수", "테프")
+_CAT_BY_TYPE = {"채집": "약초류", "재배": "재배 작물", "벌목": "벌목 부산물", "채광": "광석류", "발굴": "발굴품",
+                "건조장": "수산물", "생산": "축산물"}
+_item_type = {}
+
+
+def item_cat(i):
+    n = item_name(i)
+    if not _item_type:
+        from collections import Counter
+        cnt = defaultdict(Counter)
+        for zk, z in D["zones"].items():
+            t = node_type(zk)[1]
+            for x, q in z["unlucky"].items():
+                cnt[x][NODE_TYPES[t] if t < len(NODE_TYPES) else ""] += q
+        _item_type.update({x: c.most_common(1)[0][0] for x, c in cnt.items()})
+    if "버섯" in n:
+        return "버섯류"
+    if "수액" in n:
+        return "수액류"
+    if "원목" in n or "널빤지" in n:
+        return "원목류"
+    if any(n == g or n.endswith(" " + g) for g in GRAINS):
+        return "곡물류"
+    if "가루" in n:
+        return "가루류"
+    if "원석" in n:
+        return "원석류"
+    return _CAT_BY_TYPE.get(_item_type.get(i), "기타")
+
+
+def slot_cat(accept):
+    """칸(허용 아이템 묶음)의 분류: 노드에서 나오는 것 기준 가장 많은 분류"""
+    from collections import Counter
+    ids = [i for i in accept if i in plan.node_items(D)] or list(accept)
+    return Counter(item_cat(i) for i in ids).most_common(1)[0][0]
+
+
 def node_type(zk):
     n = D["zones"][zk]["name"].replace("채석장", "채광")
     t = next((t for t in NODE_TYPES if t in n), n)
@@ -301,8 +342,12 @@ def _expand(body):
 def expand_api(body):
     """계산 전에 노드로 모을 재료 목록 (보유 개수 입력용). key = 보유 입력 키(아이템 ID 쉼표), daily = 하루 필요량"""
     src, _, _, _, _, slots, others, found = _expand(body)
-    return {"slots": [{"key": ",".join(map(str, a)), "label": l, "daily": q, "hand": is_hand(body, a),
-                       "items": [item_name(i) for i in a if i in plan.node_items(D)][:8]} for l, a, q in slots],
+    # '직접 채집(노드 안 씀)'으로 돌린 노드 재료도 목록에 남김 (다시 노드로 되돌릴 수 있게)
+    own = [(l, a, q) for l, q, a in others if plan.slot_mode(D, a, src) == "self" and any(i in plan.node_items(D) for i in a)]
+    return {"slots": [{"key": ",".join(map(str, a)), "label": l, "daily": q, "hand": is_hand(body, a), "self": si >= len(slots),
+                       "cat": slot_cat(a), "items": [item_name(i) for i in a if i in plan.node_items(D)][:8]}
+                      for si, (l, a, q) in enumerate(slots + own)],
+            "cats": CATS,
             "others": [{"label": l, "qty": q, "reason": plan.other_reason(D, a, src)} for l, q, a in others],
             "auto_found": found}
 
@@ -366,7 +411,7 @@ def _plan(body):
         "node_cp": res["node_cp"], "house_cp": res["house_cp"],
         # got = 노드 생산 + 보유분 하루 몫
         "slots": [{"label": l, "qty": q, "got": got + stock.get(si, 0), "ids": list(a), "mode": "node", "nice": nice_slots.get(si, 0),
-                   "stock": stock_n[si], "stock_daily": stock.get(si, 0), "hand": is_hand(body, a),
+                   "stock": stock_n[si], "stock_daily": stock.get(si, 0), "hand": is_hand(body, a), "cat": slot_cat(a),
                    "items": [item_name(i) for i in a if i in plan.node_items(D)][:8]}
                   for si, ((l, a, q), got) in enumerate(zip(slots, res["got"]))],
         "chosen": [{

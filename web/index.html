@@ -135,6 +135,9 @@ tr.grp td { background: var(--accent-soft, rgba(127,127,127,.08)); font-weight: 
 .slot-head { display: flex; justify-content: space-between; gap: 8px; }
 .slot-head .bad { color: var(--bad); font-weight: 600; }
 .slot-items { color: var(--muted); font-size: 12px; }
+.cat-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 10px; margin: 14px 0 2px; padding-bottom: 4px; border-bottom: 2px solid var(--line); }
+.cat-head small { color: var(--muted); }
+.cat-btns { margin-left: auto; font-size: 12px; color: var(--muted); }
 .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 12px; }
 .grid2 > .panel { margin-top: 0; }
 .grid2 + .panel { margin-top: 12px; }
@@ -501,6 +504,24 @@ $('#days').onchange = e => { S.days = Math.max(1, Math.round(+e.target.value) ||
 
 // ---------- 완성품 ----------
 // ---------- 보유 재료: 계산 전에 하위 재료를 불러와 가진 개수 입력 ----------
+// 재료마다 조달: 노드로만(부족하면 기간 늘림) / 노드 + 손채집(S.hand: 노드 최대, 남는 건 손채집) / 손채집만(노드 안 씀 = 조달 '따로 모음')
+const HOW_KO = { node: '노드로만', hand: '노드 + 손채집', self: '손채집만' };
+const CATS = ['약초류', '버섯류', '곡물류', '재배 작물', '수액류', '원목류', '벌목 부산물', '광석류', '원석류', '가루류', '발굴품', '수산물', '축산물', '기타'];
+const howOf = m => m.self ? 'self' : S.hand[m.key] ? 'hand' : 'node';
+function byCat(list) {
+  const g = {};
+  list.forEach(m => (g[m.cat || '기타'] = g[m.cat || '기타'] || []).push(m));
+  const rank = c => { const i = CATS.indexOf(c); return i < 0 ? 99 : i; };
+  return Object.keys(g).sort((a, b) => rank(a) - rank(b)).map(c => [c, g[c]]);
+}
+function setHow(key, how) {
+  const ids = key.split(',');
+  if (how === 'self') { ids.forEach(i => { S.sourcing[i] = 'self'; }); delete S.hand[key]; }
+  else {
+    ids.forEach(i => { if (S.sourcing[i] === 'self') delete S.sourcing[i]; });
+    if (how === 'hand') S.hand[key] = true; else delete S.hand[key];
+  }
+}
 const inputSig = () => JSON.stringify([S.products, S.materials, S.sourcing, S.days]);
 function renderStock() {
   $('#stockDaysLbl').textContent = S.stock_days;
@@ -509,15 +530,20 @@ function renderStock() {
   $('#stockHint').innerHTML = L.sig !== inputSig()
     ? '<span style="color:var(--bad)">만들 것이 바뀌었습니다 — 다시 불러오세요.</span>'
     : `노드 재료 ${L.slots.length}종 · 하루 필요량은 기본 생산량(배율 ×1) 기준`;
-  $('#stockList').innerHTML = L.slots.length ? L.slots.map(m => {
-    const n = S.stock[m.key] || 0, per = n / S.stock_days;
+  const row = m => {
+    const n = S.stock[m.key] || 0, per = n / S.stock_days, how = howOf(m);
     return `<div class="slot"><div class="slot-head"><span>${esc(m.label)}</span>
-      <span style="font-size:12px;color:var(--muted)">하루 ${fmt(m.daily)}개 필요 · 보유
-        <input type="number" class="stockIn" data-k="${m.key}" min="0" value="${n || ''}" placeholder="0" style="width:110px;padding:2px 6px;font-size:12px">개 ·
-        <label title="노드는 그대로 최대한 잡고, 이 재료 때문에 기간을 늘리지 않음. 노드로 모자란 양은 직접 채집"><input type="checkbox" class="handChk" data-k="${m.key}" ${S.hand[m.key] ? 'checked' : ''}> 모자란 만큼 직접 채집</label></span></div>
+      <span style="font-size:12px;color:var(--muted)">${how === 'self' ? `하루 ${fmt(m.daily)}개` : `하루 ${fmt(m.daily)}개 필요 · 보유
+        <input type="number" class="stockIn" data-k="${m.key}" min="0" value="${n || ''}" placeholder="0" style="width:110px;padding:2px 6px;font-size:12px">개`} ·
+        <select class="howSel" data-k="${m.key}" style="width:auto;padding:2px 6px;font-size:12px">${Object.entries(HOW_KO).map(([k, v]) =>
+          `<option value="${k}" ${k === how ? 'selected' : ''}>${v}</option>`).join('')}</select></span></div>
       ${m.items.length > 1 ? `<div class="slot-items">${esc(m.items.join(', '))}</div>` : ''}
-      ${n ? `<div class="slot-items">→ 하루 ${fmt(per)}개씩 ${S.stock_days}일 · ${per >= m.daily ? '<b>보유분으로 충분 (노드 불필요)</b>' : `노드로 하루 ${fmt(m.daily - per)}개`}</div>` : ''}</div>`;
-  }).join('') : '<p class="hint">노드로 모을 재료가 없습니다.</p>';
+      ${how === 'self' ? '<div class="slot-items">손채집만 — 노드 계산에서 빠집니다</div>'
+        : n ? `<div class="slot-items">→ 하루 ${fmt(per)}개씩 ${S.stock_days}일 · ${per >= m.daily ? '<b>보유분으로 충분 (노드 불필요)</b>' : `노드로 하루 ${fmt(m.daily - per)}개`}</div>` : ''}</div>`;
+  };
+  $('#stockList').innerHTML = L.slots.length ? byCat(L.slots).map(([c, list]) => `<div class="cat-head"><b>${esc(c)}</b> <small>${list.length}종</small>
+      <span class="cat-btns">모두: ${Object.entries(HOW_KO).map(([k, v]) => `<button class="link catHow" data-cat="${esc(c)}" data-how="${k}">${v}</button>`).join(' · ')}</span></div>
+      ${list.map(row).join('')}`).join('') : '<p class="hint">노드로 모을 재료가 없습니다.</p>';
 }
 $('#loadMats').onclick = async () => {
   if (!S.products.length && !S.materials.length) { $('#stockHint').textContent = '완성품이나 재료를 먼저 추가하세요.'; return; }
@@ -770,13 +796,20 @@ document.addEventListener('change', e => {
   save(); renderSettings(); renderStock();
   $('#runBtn').textContent = '다시 계산하기 (보유 재료 바뀜)';
 });
-// 모자란 만큼 직접 채집: 노드는 그대로, 이 재료로 기간을 늘리지 않음 → 기간이 바뀌니 목록(하루 필요량)도 다시 불러옴
-document.addEventListener('change', e => {
-  if (!e.target.classList.contains('handChk')) return;
-  if (e.target.checked) S.hand[e.target.dataset.k] = true; else delete S.hand[e.target.dataset.k];
+// 조달 바꾸기 (재료 하나 / 분류 전체). 기간·목록이 바뀌니 목록을 다시 불러옴
+function howChanged() {
   save(); renderSettings();
   if (S.mat_list) $('#loadMats').click();
-  $('#runBtn').textContent = '다시 계산하기 (직접 채집 바뀜)';
+  $('#runBtn').textContent = '다시 계산하기 (조달 방법 바뀜)';
+}
+document.addEventListener('change', e => {
+  if (!e.target.classList.contains('howSel')) return;
+  setHow(e.target.dataset.k, e.target.value); howChanged();
+});
+document.addEventListener('click', e => {
+  if (!e.target.classList.contains('catHow') || !S.mat_list) return;
+  S.mat_list.slots.filter(m => (m.cat || '기타') === e.target.dataset.cat).forEach(m => setHow(m.key, e.target.dataset.how));
+  howChanged();
 });
 document.addEventListener('click', e => {
   if (!e.target.classList.contains('neckHand')) return;
@@ -874,8 +907,8 @@ function renderResults(r) {
     ${qualityHtml(r)}
     ${scaleNote(r)}
     ${r.expansion.some(e => e.bottleneck) ? `<div class="panel" style="margin-top:12px;border-color:var(--accent)"><b>병목으로 기간이 늘어난 항목</b>
-      ${r.expansion.filter(e => e.bottleneck).map(e => `<p class="hint" style="margin:6px 0 0">${esc(e.name)}: <b>${esc(e.bottleneck.label)}</b> 노드 최대 하루 ${fmt(e.bottleneck.per_day)}개 → 약 ${fmt(e.bottleneck.days)}일${e.bottleneck.ids ? ` <button class="link neckHand" data-k="${e.bottleneck.ids.join(',')}">→ 노드로 최대한 + 모자란 건 직접 채집으로 다시 계산</button>` : ''}</p>`).join('')}
-      <p class="hint" style="margin:6px 0 0">버튼을 누르면 그 재료 노드는 그대로 최대한 잡고, 기간은 늘리지 않고, 모자란 양은 '직접 채집'으로 보여줍니다 (만들 것 탭 보유 재료에서 체크를 풀면 되돌아감).</p></div>` : ''}
+      ${r.expansion.filter(e => e.bottleneck).map(e => `<p class="hint" style="margin:6px 0 0">${esc(e.name)}: <b>${esc(e.bottleneck.label)}</b> 노드 최대 하루 ${fmt(e.bottleneck.per_day)}개 → 약 ${fmt(e.bottleneck.days)}일${e.bottleneck.ids ? ` <button class="link neckHand" data-k="${e.bottleneck.ids.join(',')}">→ '노드 + 손채집'으로 다시 계산</button>` : ''}</p>`).join('')}
+      <p class="hint" style="margin:6px 0 0">버튼을 누르면 그 재료 노드는 그대로 최대한 잡고, 기간은 늘리지 않고, 남는 양은 손채집으로 보여줍니다 (만들 것 탭 보유 재료에서 '노드로만'으로 되돌릴 수 있음).</p></div>` : ''}
     ${r.auto_found && r.auto_found.length ? `<div class="panel" style="margin-top:12px;border-color:var(--accent)">코덱스 아이템 설명에서 조합식을 자동으로 찾았습니다: <b>${esc(r.auto_found.join(', '))}</b><p class="hint">게임과 다르면 설정의 '조합식 직접 추가'에서 고칠 수 있습니다.</p></div>` : ''}
     <div class="status">${esc(statusText)} · ${r.time.toFixed(1)}초${budgetCalc() ? ` · 쓸 수 있는 공헌도 ${budgetCalc().avail}` : ''}${short.length ? ` · <b style="color:var(--bad)">부족한 재료 ${short.length}종</b>` : ''}</div>
     <div class="row" style="margin-top:10px">
@@ -945,16 +978,17 @@ function renderResults(r) {
   // 최하단: 재료
   mats.innerHTML = `
     <div class="panel">
-      <h2>재료 충족 <small>하루 기준 · 부족한 재료부터</small></h2>
-      ${[...r.slots].sort((x, y) => covered(x.got, x.qty - x.nice) - covered(y.got, y.qty - y.nice) || x.got / x.qty - y.got / y.qty).map(s => { const ok = covered(s.got, s.qty); const pct = Math.min(100, s.got / s.qty * 100);
+      <h2>재료 충족 <small>하루 기준 · 분류별, 부족한 재료부터</small></h2>
+      ${byCat([...r.slots].sort((x, y) => covered(x.got, x.qty - x.nice) - covered(y.got, y.qty - y.nice) || x.got / x.qty - y.got / y.qty)).map(([c, list]) =>
+        `<div class="cat-head"><b>${esc(c)}</b> <small>${list.length}종</small></div>${list.map(s => { const ok = covered(s.got, s.qty); const pct = Math.min(100, s.got / s.qty * 100);
         const sk = s.ids.join(',');
         return `<div class="slot"><div class="slot-head"><span>${esc(s.label)} ${srcSelect(s.ids, s.mode)}
           <label style="font-size:12px;color:var(--muted);margin-left:6px">보유 <input type="number" class="stockIn" data-k="${sk}" min="0" value="${S.stock[sk] || ''}" placeholder="0" style="width:90px;padding:2px 6px;font-size:12px"></label></span>
-          <span class="${ok || s.hand ? '' : (covered(s.got, s.qty - s.nice) ? '' : 'bad')}">${fmt(s.got)} / ${fmt(s.qty)}${s.nice ? ` <small>(여유 ${fmt(s.nice)})</small>` : ''}${ok ? '' : s.hand ? ` <small>+ 직접 채집 ${fmt(s.qty - s.got)}</small>` : (covered(s.got, s.qty - s.nice) ? ' <small>여유분 일부</small>' : ' 부족')}</span></div>
+          <span class="${ok || s.hand ? '' : (covered(s.got, s.qty - s.nice) ? '' : 'bad')}">${fmt(s.got)} / ${fmt(s.qty)}${s.nice ? ` <small>(여유 ${fmt(s.nice)})</small>` : ''}${ok ? '' : s.hand ? ` <small>+ 손채집 ${fmt(s.qty - s.got)}</small>` : (covered(s.got, s.qty - s.nice) ? ' <small>여유분 일부</small>' : ' 부족')}</span></div>
           <div class="bar ${ok || s.hand ? '' : 'bad'}"><i style="width:${pct}%"></i></div>
           ${s.items.length > 1 ? `<div class="slot-items">${esc(s.items.join(', '))}</div>` : ''}
-          ${s.hand && !ok ? `<div class="slot-items">노드로 최대한(하루 ${fmt(s.got)}) · 모자란 하루 ${fmt(s.qty - s.got)}개는 직접 채집</div>` : ''}
-          ${s.stock ? `<div class="slot-items">보유 ${fmt(s.stock)}개 → 하루 ${fmt(s.stock_daily)}개씩 (${fmt(s.stock / s.stock_daily)}일) + 노드 생산 ${fmt(s.got - s.stock_daily)}</div>` : ''}</div>`; }).join('')}
+          ${s.hand && !ok ? `<div class="slot-items">노드 하루 ${fmt(s.got)} + 손채집 하루 ${fmt(s.qty - s.got)}개</div>` : ''}
+          ${s.stock ? `<div class="slot-items">보유 ${fmt(s.stock)}개 → 하루 ${fmt(s.stock_daily)}개씩 (${fmt(s.stock / s.stock_daily)}일) + 노드 생산 ${fmt(s.got - s.stock_daily)}</div>` : ''}</div>`; }).join('')}`).join('')}
     </div>
     ${othersHtml(r)}`;
   $('#resRecipe').innerHTML = expansionHtml(r);
@@ -1056,7 +1090,7 @@ function exportCsv(r) {
     [e.name, x.depth, '  '.repeat(x.depth) + x.label, x.how, +x.qty.toFixed(2), +(x.qty * (e.scale || 1)).toFixed(2)])));
   sec('투자할 노드', ['노드', '공헌도'], r.invested.map(n => [n.name, n.cp]));
   sec('집', ['지역', '마을', '집', '용도', '공헌도', '보유', '시트 비고'], r.houses.map(h => [h.region, h.town_name, h.name, useText(h), h.cp, h.owned ? '보유' : h.reserved ? '창고용' : '', h.note || '']));
-  sec('재료 충족(하루)', ['재료', '필요', '확보', '여유분', '상태'], r.slots.map(s => [s.label, +s.qty.toFixed(3), +s.got.toFixed(3), s.nice || 0, covered(s.got, s.qty - s.nice) ? '충족' : s.hand ? `직접 채집 ${+(s.qty - s.got).toFixed(1)}` : '부족']));
+  sec('재료 충족(하루)', ['재료', '필요', '확보', '여유분', '상태'], r.slots.map(s => [s.label, +s.qty.toFixed(3), +s.got.toFixed(3), s.nice || 0, covered(s.got, s.qty - s.nice) ? '충족' : s.hand ? `손채집 ${+(s.qty - s.got).toFixed(1)}` : '부족']));
   sec('노드 계산에서 빠진 재료(하루)', ['재료', '수량', '조달'], r.others.map(o => [o.label, +o.qty.toFixed(3), o.reason]));
   const csv = '\ufeff' + rows.map(row => row.map(q).join(',')).join('\r\n');  // BOM: 엑셀에서 한글 깨짐 방지
   download(`노드플래너_${today()}.csv`, new Blob([csv], { type: 'text/csv;charset=utf-8' }));
@@ -1406,7 +1440,7 @@ function expansionHtml(r) {
     const howTag = h => `<span class="how ${h === '노드' ? 'node' : ''}">${esc(h)}</span>`;
     return `<div class="panel" id="exp-${idx}" style="margin-top:12px;scroll-margin-top:120px">
       <h2>${esc(e.name)} <small>× ${e.crafts}${sc ? ` → <b style="color:var(--accent)">${fmt(e.crafts * sc)}</b> 가능` : ''}${e.days > 1 ? ` / ${fmt(e.days)}일` : ' / 하루'}${e.priority === 'nice' ? ' · 여유' : ''}</small></h2>
-      ${e.bottleneck ? `<p class="hint" style="margin:0 0 8px;color:var(--accent)">병목: <b>${esc(e.bottleneck.label)}</b> — 노드를 다 돌려도 하루 최대 ${fmt(e.bottleneck.per_day)}개 (1개 만드는 데 ${fmt(e.bottleneck.per_unit)}개 필요) → <b>약 ${fmt(e.bottleneck.days)}일</b> 기준으로 계산${e.bottleneck.ids ? ` <button class="link neckHand" data-k="${e.bottleneck.ids.join(',')}">→ 노드로 최대한 + 모자란 건 직접 채집으로 다시 계산</button>` : ''}</p>` : ''}
+      ${e.bottleneck ? `<p class="hint" style="margin:0 0 8px;color:var(--accent)">병목: <b>${esc(e.bottleneck.label)}</b> — 노드를 다 돌려도 하루 최대 ${fmt(e.bottleneck.per_day)}개 (1개 만드는 데 ${fmt(e.bottleneck.per_unit)}개 필요) → <b>약 ${fmt(e.bottleneck.days)}일</b> 기준으로 계산${e.bottleneck.ids ? ` <button class="link neckHand" data-k="${e.bottleneck.ids.join(',')}">→ '노드 + 손채집'으로 다시 계산</button>` : ''}</p>` : ''}
       ${tree.length ? `<div class="grid2" style="margin-top:0">
         <div><b style="font-size:13px">하위 재료 전체</b>
           <div class="tablewrap"><table class="tree"><thead><tr><th>재료</th><th>얻는 법</th>${qcols}</tr></thead><tbody>
