@@ -8,6 +8,12 @@ autorecipe.OFFLINE = True  # 브라우저에선 코덱스에 못 물어봄(CORS)
 
 import api  # noqa: E402  (OFFLINE 을 먼저 켜고 데이터 불러옴)
 
+try:  # 계산 중 진행을 워커가 화면으로 바로 보냄 (worker.js 의 planProgress)
+    import js
+    api.PROGRESS_HOOK = js.planProgress
+except (ImportError, AttributeError):
+    pass
+
 
 def handle(method, path, body_text):
     """반환: (HTTP 상태, JSON 문자열)"""
@@ -20,6 +26,8 @@ def handle(method, path, body_text):
             out = api.items_api(parse_qs(u.query).get("q", [""])[0])
         elif u.path == "/api/plan":
             out = api.plan_api(body)
+        elif u.path == "/api/progress":
+            out = api.progress_api(parse_qs(u.query).get("id", [""])[0])
         elif u.path == "/api/expand":
             out = api.finite(api.expand_api(body))
         elif u.path == "/api/manual_recipes":

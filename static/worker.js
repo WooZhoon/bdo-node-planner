@@ -8,6 +8,8 @@ const PYODIDE = 'https://cdn.jsdelivr.net/pyodide/v314.0.7/full/';
 const APP = '/home/pyodide/app';
 let handle = null, manualText = null;
 const progress = text => self.postMessage({ type: 'progress', text });
+// 계산 중 '지금까지 찾은 최선의 답' — 파이썬(webapi)이 부름
+self.planProgress = text => self.postMessage({ type: 'plan_progress', text });
 
 async function init({ bundle, manual }) {
   progress('파이썬 불러오는 중…');

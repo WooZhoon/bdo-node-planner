@@ -24,6 +24,11 @@ def plan_api():
     return jsonify(api.plan_api(request.get_json(force=True)))
 
 
+@app.get("/api/progress")
+def progress_api():
+    return jsonify(api.progress_api(request.args.get("id", "")))
+
+
 @app.post("/api/expand")
 def expand_api():
     return jsonify(api.finite(api.expand_api(request.get_json(force=True))))

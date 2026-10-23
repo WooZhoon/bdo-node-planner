@@ -19,9 +19,11 @@
   const worker = new Worker('worker.js?v=' + V, { type: 'module' });
   const waiting = new Map();
   let seq = 0, done = false, failed = null, readyResolve;
+  let live = null;  // 계산 중 워커가 보내는 '지금까지 찾은 최선의 답' (워커는 계산 중 다른 요청을 못 받음)
   const ready = new Promise(r => { readyResolve = r; });
   worker.onmessage = ({ data: m }) => {
     if (m.type === 'progress') show(`계산 엔진 준비 중 · ${m.text}${hint}`);
+    else if (m.type === 'plan_progress') { try { live = JSON.parse(m.text); } catch { /* 무시 */ } }
     else if (m.type === 'ready') { done = true; bar.remove(); lsSet('bdo-planner-engine-ok', '1'); readyResolve(); }
     else if (m.type === 'failed') {
       done = true; failed = m.text; readyResolve();
@@ -38,8 +40,10 @@
 
   window.PLANNER_API = {
     async call(method, path, body) {
+      if (path.startsWith('/api/progress')) return { ok: true, status: 200, data: live };
       await ready;
       if (failed) throw new Error('계산 엔진 오류');
+      if (path === '/api/plan') live = null;
       const id = ++seq;
       return new Promise(res => { waiting.set(id, res); worker.postMessage({ id, method, path, body }); });
     },

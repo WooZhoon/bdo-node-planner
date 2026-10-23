@@ -63,6 +63,9 @@ def meta():
 _max_daily = {}
 BOTTLENECK_SLACK = 0.75  # 실제 배치는 노드별 최대(일꾼 종류를 그 재료 기준으로 고른 값)의 77~86% (10/23 측정)
 STOCK_DAYS = 180  # 보유 재료를 다 쓰는 기간 기본값 (사용자: 약 6개월)
+# 계산 중 진행: {계산 번호: 지금까지 찾은 최선의 답 요약}. 화면이 /api/progress 로 물어봄 (서버판)
+PROGRESS = {}
+PROGRESS_HOOK = None  # 브라우저판: 워커가 화면으로 바로 보내는 함수 (계산 중엔 다른 요청을 못 받으므로)
 
 
 def max_daily(accept, kinds):
@@ -375,6 +378,16 @@ def _plan(body):
     owned = {int(k) for k in body.get("owned", [])}
     beds = {int(tk): int(n) for tk, n in (body.get("beds") or {}).items() if int(n)}
     budget = body.get("budget")
+    run_id = str(body.get("run_id") or "")
+
+    def on_progress(d):
+        d = {**d, "zones": [{"k": zk, "name": plan.zone_label(D, zk)} for zk in d["zones"]]}
+        if run_id:
+            PROGRESS[run_id] = d
+            while len(PROGRESS) > 5:
+                PROGRESS.pop(next(iter(PROGRESS)))
+        if PROGRESS_HOOK:
+            PROGRESS_HOOK(json.dumps(finite(d), ensure_ascii=False))
     # 보유 재료: {아이템 ID 들(쉼표): 개수} → 소진 기간(기본 180일)에 나눠 하루 몫만큼 노드 없이 채움
     stock_days = max(1, int(body.get("stock_days") or STOCK_DAYS))
     stock = {si: v for si, v in enumerate(stock_daily(body, a) for _, a, _ in slots) if v}
@@ -393,7 +406,7 @@ def _plan(body):
                          fixed_workers={IMPERIAL_TOWN: min(8, max(0, int(body.get("imperial_workers") or 0)))}
                          if IMPERIAL_TOWN else None,
                          goal="min" if body.get("goal") == "min" else "max",
-                         grow_parts=[g for _, g in grow], stock=stock)
+                         grow_parts=[g for _, g in grow], stock=stock, progress=on_progress)
     for (ei, _), sc in zip(grow, res["scales"]):
         expansion[ei]["scale"] = sc
     g = D["graph"]
@@ -435,6 +448,11 @@ def _plan(body):
         "imperial": res["fixed"].get(IMPERIAL_TOWN, 0) if IMPERIAL_TOWN else 0,
     })
     return out
+
+
+def progress_api(run_id):
+    """계산 중 지금까지 찾은 최선의 답 (없으면 null)"""
+    return finite(PROGRESS.get(str(run_id)))
 
 
 def items_api(q):

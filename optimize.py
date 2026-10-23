@@ -110,14 +110,15 @@ def pair_yields(d, slots, paths, towns_per_zone, zones_per_slot, kinds=plan.DEFA
 def solve(d, slots, owned=frozenset(), extra_beds=None, budget=None, towns_per_zone=3, zones_per_slot=6,
           paths_per_pair=5, time_limit=120, owned_houses=frozenset(), storage=True, base_storage=16,
           worker_kinds=plan.DEFAULT_KINDS, nice=None, lodge_eff_min=None, extra_workers=0, fixed_workers=None,
-          goal="min", grow_parts=None, stock=None):
+          goal="min", grow_parts=None, stock=None, progress=None):
     """slots: [(라벨, 허용 아이템 tuple, 하루 필요량)]
     storage: 창고 칸까지 계산할지. base_storage: 마을 기본 창고 칸 (KR 16, 가치 패키지면 32)
     worker_kinds: 쓸 일꾼 종류 (goblin/giant/human). 여러 개면 노드마다 생산량이 좋은 쪽
     nice: 칸별 '여유' 수량 {칸 번호: 수량}. 필요량 중 이만큼은 부족해도 벌점이 작음 (남는 공헌도로 되는 만큼)
     extra_workers: 노드 말고 따로 둘 일꾼 수 (농사용 등, 지역 무관) — 숙소만 필요, 창고 계산 없음
     fixed_workers: 마을이 정해진 일꾼 {마을: 인원} (예: 황실 공방 — 육조거리) — 숙소만 필요
-    stock: 칸별 보유분에서 하루에 꺼내 쓰는 양 {칸 번호: 하루 몫} — 그만큼은 노드 없이 채움 (보유 ÷ 소진 기간)"""
+    stock: 칸별 보유분에서 하루에 꺼내 쓰는 양 {칸 번호: 하루 몫} — 그만큼은 노드 없이 채움 (보유 ÷ 소진 기간)
+    progress: 계산 중 지금까지 찾은 최선의 답 요약을 받는 함수 (시작 해, 더 나은 해를 찾을 때마다, 1초마다 갭)"""
     fixed_workers = {tk: n for tk, n in (fixed_workers or {}).items() if n > 0}
     nice = nice or {}
     st = [float((stock or {}).get(si, 0)) for si in range(len(slots))]
@@ -300,6 +301,8 @@ def solve(d, slots, owned=frozenset(), extra_beds=None, budget=None, towns_per_z
     m.h.setOptionValue("time_limit", float(time_limit))
     m.h.setOptionValue("mip_rel_gap", MIP_GAP)
     t1 = time.perf_counter()
+    if progress:
+        watch_progress(m.h, progress, vec, t1, cost, x, nodes, hcost, buy, a, pl, s, slots, T)
     m.h.run()
     sol = m.h.getSolution().col_value
     status = m.h.modelStatusToString(m.h.getModelStatus())
@@ -342,6 +345,39 @@ def solve(d, slots, owned=frozenset(), extra_beds=None, budget=None, towns_per_z
         "scales": [1 + sum(sol[t_] for t_ in seg) for seg in T] if T else [1.0] * len(parts),
         "goal": "max" if T else "min",
     }
+
+
+def watch_progress(h, progress, start, t1, cost, x, nodes, hcost, buy, a, pl, s, slots, T):
+    """계산 중 진행 알림: 시작 해(그리디)를 먼저 보내고, HiGHS 가 더 나은 해를 찾을 때마다 + 1초마다(갭·시간) 보냄"""
+    state = {"found": 0, "last": 0.0, "best": None}
+
+    def summary(sol):
+        on = lambda i: sol[i] > 0.5  # noqa: E731
+        return {"node_cp": sum(cost[v] for v in nodes if cost[v] and on(x[v])),
+                "house_cp": sum(hcost[k] for bv in buy.values() for k, i in bv.items() if hcost[k] and on(i)),
+                "workers": sum(1 for p in pl if on(a[p])),
+                "scale": min((1 + sum(sol[t_] for t_ in seg) for seg in T), default=1.0),
+                "short": sum(1 for si, (_, _, q) in enumerate(slots) if sol[s[si]] > q * 1e-3),
+                "zones": sorted({p[0] for p in pl if on(a[p])}),
+                "invested": [v for v in nodes if cost[v] and on(x[v])]}
+
+    def send(gap=None):
+        state["last"] = time.perf_counter()
+        progress({**state["best"], "found": state["found"], "gap": gap, "t": round(state["last"] - t1, 1)})
+
+    def improving(e):
+        state["found"] += 1
+        state["best"] = summary(list(e.data_out.mip_solution))
+        send(e.data_out.mip_gap)
+
+    def tick(e):
+        if state["best"] and time.perf_counter() - state["last"] >= 1.0:
+            send(e.data_out.mip_gap)
+
+    state["best"] = summary(list(start))
+    send()
+    h.cbMipImprovingSolution.subscribe(improving)
+    h.cbMipInterrupt.subscribe(tick)
 
 
 def start_scales(parts, left, caps):
