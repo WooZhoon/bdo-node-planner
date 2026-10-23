@@ -24,6 +24,11 @@ def plan_api():
     return jsonify(api.plan_api(request.get_json(force=True)))
 
 
+@app.post("/api/expand")
+def expand_api():
+    return jsonify(api.finite(api.expand_api(request.get_json(force=True))))
+
+
 @app.get("/api/items")
 def items_api():
     return jsonify(api.items_api(request.args.get("q", "")))

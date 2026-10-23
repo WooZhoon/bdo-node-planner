@@ -20,6 +20,8 @@ def handle(method, path, body_text):
             out = api.items_api(parse_qs(u.query).get("q", [""])[0])
         elif u.path == "/api/plan":
             out = api.plan_api(body)
+        elif u.path == "/api/expand":
+            out = api.finite(api.expand_api(body))
         elif u.path == "/api/manual_recipes":
             out = api.manual_list() if method == "GET" else api.manual_save(body)
         elif u.path.startswith("/api/manual_recipes/") and method == "DELETE":

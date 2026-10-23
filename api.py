@@ -243,7 +243,8 @@ def plan_api(body):
     return finite(_plan(body))
 
 
-def _plan(body):
+def _expand(body):
+    """완성품·재료 → 노드로 모을 칸(slots)과 노드 계산에서 빠지는 재료(others). 계산(_plan)과 재료 불러오기(expand_api) 공용"""
     # 지역 자원량(%): 실제 작업량 = 기본 × (2 − 자원량). 기본 0% (보수적)
     D["_resource_pct"] = min(100, max(0, float(body.get("resource_pct") or plan.RESOURCE_DEFAULT)))
     # 화면에서 재료별로 정한 조달 방법 {아이템 ID: node/buy/farm/self}
@@ -279,6 +280,20 @@ def _plan(body):
                 new = True
         if not new:
             break
+    return src, need, nice_need, expansion, parts, slots, others, found
+
+
+def expand_api(body):
+    """계산 전에 노드로 모을 재료 목록 (보유 개수 입력용). key = 보유 입력 키(아이템 ID 쉼표), daily = 하루 필요량"""
+    src, _, _, _, _, slots, others, found = _expand(body)
+    return {"slots": [{"key": ",".join(map(str, a)), "label": l, "daily": q,
+                       "items": [item_name(i) for i in a if i in plan.node_items(D)][:8]} for l, a, q in slots],
+            "others": [{"label": l, "qty": q, "reason": plan.other_reason(D, a, src)} for l, q, a in others],
+            "auto_found": found}
+
+
+def _plan(body):
+    src, need, nice_need, expansion, parts, slots, others, found = _expand(body)
 
     def mode_of(accept):
         return plan.slot_mode(D, accept, src)
