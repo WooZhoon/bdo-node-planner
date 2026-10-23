@@ -125,6 +125,25 @@ def bottleneck_days(unit_need, qty, days, src, kinds, body=None):
     return days, None
 
 
+def cut_reason(part, slots, cut, stock, kinds, body):
+    """생산량 최대에서 수량을 줄인 항목의 병목: 그 항목 재료 중 노드 최대 생산량을 가장 많이 쓰는 칸
+    (줄인 뒤 하루 필요량 − 보유분 하루 몫) ÷ 노드 최대. 다들 여유가 있으면 공헌도 예산이 모자란 것"""
+    best = None
+    for si in part:
+        label, accept, q = slots[si]
+        if is_hand(body, accept):
+            continue
+        cap = max_daily(tuple(accept), kinds)
+        need = max(0.0, q - cut[si] - stock.get(si, 0))
+        use = need / cap if cap > 0 else float("inf")
+        if not best or use > best["use"]:
+            best = {"label": label, "per_day": cap, "need": need, "use": use, "ids": list(accept)}
+    if not best or best["use"] < BOTTLENECK_SLACK * 0.8:
+        return {"label": None}  # 공헌도 예산
+    best["use"] = min(best["use"], 9.99)
+    return best
+
+
 def expand_request(body, src):
     """완성품·재료마다 펼쳐서 하루 몫 필요량을 필수/여유로 나눠 합침.
     항목별 days(목표 기간)가 없으면 전체 목표 기간, priority 가 'nice' 면 여유"""
@@ -408,8 +427,12 @@ def _plan(body):
                          goal="min" if body.get("goal") == "min" else "max",
                          grow_parts=[g for _, g in grow], stock=stock, progress=on_progress,
                          hand={si for si, (_, a, _) in enumerate(slots) if is_hand(body, a)})
-    for (ei, _), sc in zip(grow, res["scales"]):
+    kinds = tuple(k for k in (body.get("worker_kinds") or plan.WORKER_KINDS) if k in plan.WORKER_KINDS) or plan.WORKER_KINDS
+    cut = res.get("cut") or [0.0] * len(slots)
+    for (ei, part), sc in zip(grow, res["scales"]):
         expansion[ei]["scale"] = sc
+        if sc < 0.995:
+            expansion[ei]["cut"] = cut_reason(part, slots, cut, stock, kinds, body)
     g = D["graph"]
     # 창고용 집은 계획에서 안 써도 전부 산다는 뜻 → 최적화가 안 고른 것도 표에 넣음 (효율 기준 집 = 창고, 선행만 걸린 집 = 선행)
     listed = {h["key"] for h in res["houses"]}
