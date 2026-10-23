@@ -38,7 +38,7 @@ def load():
         for w, kind in zip(t["workers"], WORKER_KINDS):
             w["kind"] = kind
     d["zones"] = {int(k): {**v, **{f: {int(i): q for i, q in v[f].items()}
-                                   for f in ("unlucky", "unlucky_gi", "lucky", "dist")}}
+                                   for f in ("unlucky", "unlucky_gi", "lucky", "luck_drops", "dist")}}
                   for k, v in d["zones"].items()}
     d["graph"] = {int(k): v for k, v in d["graph"].items()}
     d["processing"] = {int(k): v for k, v in d["processing"].items()}
@@ -130,6 +130,23 @@ def direct_node(d, i, seen=frozenset()):
     # 가공 입력이 노드 주 생산품일 때만 가공 쪽으로 (오팔 원석 ← 개량석 빻기 같은 분해 경로는 X)
     bp = best_proc(d, i, seen | {i})
     return not (bp and strong(bp["inputs"][0][0]))
+
+
+def worker_drops(z, w):
+    """일꾼 하나가 트립당 가져오는 기대 개수: 기본(거인은 unlucky_gi) + 행운/100 × 행운 추가분(보따리 내용물 포함)"""
+    key = (w["giant"], w["luck"])
+    cache = z.setdefault("_drops", {})
+    if key not in cache:
+        out = dict(z["unlucky_gi"] if w["giant"] else z["unlucky"])
+        for i, q in z.get("luck_drops", {}).items():
+            out[i] = out.get(i, 0) + w["luck"] / 100 * q
+        cache[key] = out
+    return cache[key]
+
+
+def zone_has(z, accept):
+    """노드에서 허용 아이템 중 하나라도 나오는지 (행운 보따리 내용물 포함)"""
+    return any(i in z["unlucky"] or i in z.get("luck_drops", {}) for i in accept)
 
 
 def node_items(d):
@@ -445,13 +462,13 @@ def print_list(d, slots, top, kinds=DEFAULT_KINDS):
     for label, accept, qty in slots:
         rows = []
         for zk, z in d["zones"].items():
-            if not any(i in z["unlucky"] for i in accept):
+            if not zone_has(z, accept):
                 continue
             for tk, p in paths.items():
                 if tk not in z["dist"] or zk not in p:
                     continue
                 for w in town_workers(d, tk, kinds):
-                    drops = z["unlucky_gi"] if w["giant"] else z["unlucky"]
+                    drops = worker_drops(z, w)
                     daily = cycles_daily(active_workload(d, z["workload"]), w["wspd"] + WSPD_SKILL_BONUS, z["dist"][tk], w["mspd"]) \
                         * sum(drops.get(i, 0) for i in accept)
                     rows.append((daily / max(p[zk], 1), zk, tk, daily, p[zk], w))

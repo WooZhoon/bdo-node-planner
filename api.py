@@ -71,14 +71,14 @@ def max_daily(accept, kinds):
     if key not in _max_daily:
         total = 0.0
         for z in D["zones"].values():
-            if not any(i in z["unlucky"] for i in accept):
+            if not plan.zone_has(z, accept):
                 continue
             best = 0.0
             for tk, dist in z["dist"].items():
                 if tk not in D["towns"]:
                     continue
                 for w in plan.town_workers(D, tk, kinds):
-                    drops = z["unlucky_gi"] if w["giant"] else z["unlucky"]
+                    drops = plan.worker_drops(z, w)
                     per = sum(drops.get(i, 0) for i in accept)
                     best = max(best, plan.cycles_daily(plan.active_workload(D, z["workload"]), w["wspd"] + plan.WSPD_SKILL_BONUS, dist, w["mspd"]) * per)
             total += best
@@ -200,10 +200,10 @@ def node_type(zk):
 
 
 def daily_drops(c):
-    """배치된 일꾼 하나가 하루에 가져오는 모든 아이템 (덤 포함, 행운 제외)"""
+    """배치된 일꾼 하나가 하루에 가져오는 모든 아이템 (덤·행운 보따리 내용물 포함)"""
     z, w = D["zones"][c["zone"]], c["worker"]
     cyc = plan.cycles_daily(plan.active_workload(D, z["workload"]), w["wspd"] + plan.WSPD_SKILL_BONUS, z["dist"][c["town"]], w["mspd"])
-    drops = z["unlucky_gi"] if w["giant"] else z["unlucky"]
+    drops = plan.worker_drops(z, w)
     return {i: cyc * q for i, q in (drops.items() if isinstance(drops, dict) else drops)}
 
 

@@ -233,6 +233,22 @@ def main():
                 "houses": houses,
             }
 
+    # 행운 보따리 → 내용물 기대 개수 (보따리 1개 = 내용물 1개, 여러 종류면 균등)
+    bags = {int(b): {int(i): w for i, w in c.items()}
+            for b, c in load(ROOT / "data" / "bag_contents.json").items() if not b.startswith("_")}
+
+    def open_bags(lucky):
+        out = defaultdict(float)
+        for i, q in lucky.items():
+            i = int(i)
+            if i in bags:
+                tot = sum(bags[i].values())
+                for x, w in bags[i].items():
+                    out[x] += q * w / tot
+            else:
+                out[i] += q
+        return {i: round(q, 6) for i, q in out.items()}
+
     zones = {}
     for k, z in plantzone.items():
         d = drops.get(k)
@@ -247,6 +263,8 @@ def main():
             "items": sorted({int(i) for i in d["unlucky"]} | {int(i) for i in d.get("lucky", {})}),
             "unlucky_gi": {int(i): q for i, q in d.get("unlucky_gi", d["unlucky"]).items()},
             "lucky": {int(i): q for i, q in d.get("lucky", {}).items()},
+            # 행운 100 기준 트립당 추가 획득 (보따리는 내용물로 풂). 실제 = 일꾼 행운/100 × 이 값 (workermanjs 방식)
+            "luck_drops": open_bags(d.get("lucky", {})),
             "dist": {tk: dist for tk, dist in pzk2tk.get(k, [])},
         }
 

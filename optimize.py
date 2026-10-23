@@ -58,14 +58,19 @@ def pair_yields(d, slots, paths, towns_per_zone, zones_per_slot, kinds=plan.DEFA
     grow: 생산량 최대 — 필요량을 넘어서도 늘릴 수 있게 재료마다 후보를 최대(40)까지"""
     pairs = {}
     zones = {zk for zk, z in d["zones"].items()
-             if any(i in z["unlucky"] for _, accept, _ in slots for i in accept)}
+             if plan.zone_has(z, [i for _, accept, _ in slots for i in accept])}
     for zk in zones:
         z = d["zones"][zk]
-        # 칸별 1회 생산량은 거인 여부로만 갈림 → 마을·일꾼마다 다시 더하지 않게 미리 (브라우저판에서 특히 느렸음)
+        # 칸별 1회 생산량은 거인 여부·행운으로만 갈림 → 마을·일꾼마다 다시 더하지 않게 미리 (브라우저판에서 특히 느렸음)
         per = {}
-        for giant, drops in ((False, z["unlucky"]), (True, z["unlucky_gi"])):
-            per[giant] = {si: v for si, v in ((si, sum(drops.get(i, 0) for i in accept))
-                                              for si, (_, accept, _) in enumerate(slots)) if v > 0}
+
+        def slot_per(w):
+            key = (w["giant"], w["luck"])
+            if key not in per:
+                drops = plan.worker_drops(z, w)
+                per[key] = {si: v for si, v in ((si, sum(drops.get(i, 0) for i in accept))
+                                                for si, (_, accept, _) in enumerate(slots)) if v > 0}
+            return per[key]
         opts = []
         for tk, p in paths.items():
             if tk not in z["dist"] or zk not in p:
@@ -73,7 +78,7 @@ def pair_yields(d, slots, paths, towns_per_zone, zones_per_slot, kinds=plan.DEFA
             best = None
             for w in plan.town_workers(d, tk, kinds):
                 cyc = plan.cycles_daily(plan.active_workload(d, z["workload"]), w["wspd"] + plan.WSPD_SKILL_BONUS, z["dist"][tk], w["mspd"])
-                ys = {si: cyc * v for si, v in per[w["giant"]].items()}
+                ys = {si: cyc * v for si, v in slot_per(w).items()}
                 ys = {si: y for si, y in ys.items() if y > 0}
                 score = sum(y / slots[si][2] for si, y in ys.items())
                 if not best or score > best[0]:

@@ -810,7 +810,7 @@ function renderResults(r) {
   // 중간 3: 일꾼 · 노드 · 집
   work.innerHTML = `
     ${r.node_sets && r.node_sets.length ? `<div class="panel">
-      <h2>노드 종류별 생산 <small>하루 기준 · <b style="color:var(--accent)">필요한 재료</b> 먼저, 흐린 건 덤 · 행운 제외</small></h2>
+      <h2>노드 종류별 생산 <small>하루 기준 · <b style="color:var(--accent)">필요한 재료</b> 먼저, 흐린 건 덤 · 행운 보따리 포함(일꾼 행운 기준)</small></h2>
       <div class="sets">${r.node_sets.map(st => `<div class="set">
         <h3>${esc(st.type)} <small>일꾼 ${st.workers}명 · ${st.items.length}종</small></h3>
         <ul>${st.items.map(i => `<li class="${i.need ? 'need' : 'extra'}" title="${i.need ? '계획에 필요한 재료' : '덤 (같이 나오는 아이템)'}"><span>${esc(i.name)}</span><b>${fmt(i.daily)}</b></li>`).join('')}</ul>
