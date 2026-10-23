@@ -1134,7 +1134,7 @@ function exportText(r) {
   L.push(`[검은사막 노드 플래너] ${today()}`);
   L.push(`총 공헌도 ${r.node_cp + r.house_cp} (노드 ${r.node_cp} + 집 ${r.house_cp})${resText(r)} · 일꾼 ${r.chosen.length}명`);
   L.push('', '■ 만들 것');
-  r.expansion.forEach(e => L.push(`- ${e.name} ×${e.crafts}${e.scale > 1.005 ? ` → ${fmt(e.crafts * e.scale)} 가능 (×${e.scale.toFixed(1)})` : ''}${e.days > 1 ? ` / ${fmt(e.days)}일` : ' / 하루'}${e.priority === 'nice' ? ' (여유)' : ''}`));
+  r.expansion.forEach(e => L.push(`- ${e.name} ×${e.crafts}${scaled(e) ? ` → ${fmt(e.crafts * e.scale)} 가능 (×${e.scale.toFixed(2)})` : ''}${e.days > 1 ? ` / ${fmt(e.days)}일` : ' / 하루'}${e.priority === 'nice' ? ' (여유)' : ''}`));
   L.push('', '■ 일꾼 배치');
   byRegion(r.chosen, c => c, g => (L.push(`[${g || '기타'}]`), null)).forEach(c => L.push(`- ${c.town_name} ${c.kind} → ${c.zone_name} (${c.yields.map(y => `${y.label} ${fmt(y.daily)}/일`).join(', ')})`));
   if (r.imperial) L.push('', `■ 황실 공방 ${r.imperial}명 (육조거리)`);
@@ -1341,7 +1341,7 @@ function reportHtml(r) {
     <div class="cols">
       <div><h2>만들 것</h2><table><thead><tr><th>항목</th><th class="q">입력</th><th class="q">가능</th><th>기간</th></tr></thead><tbody>
         ${r.expansion.map(e => `<tr><td>${esc(e.name)}${e.priority === 'nice' ? ' <span class="muted">(여유)</span>' : ''}</td><td class="q">${fmt(e.crafts)}</td>
-          <td class="q"><b>${e.scale > 1.005 ? fmt(e.crafts * e.scale) : '-'}</b></td><td>${e.days > 1 ? `${fmt(e.days)}일` : '하루'}</td></tr>`).join('')}</tbody></table></div>
+          <td class="q"><b${e.scale < 0.995 ? ' style="color:#c0392b"' : ''}>${fmt(e.crafts * (e.scale ?? 1))}</b></td><td>${e.days > 1 ? `${fmt(e.days)}일` : '하루'}</td></tr>`).join('')}</tbody></table></div>
       <div><h2>지역별 요약</h2><table><thead><tr><th>지역</th><th class="q">일꾼</th><th class="q">새 집</th><th class="q">집 CP</th></tr></thead><tbody>
         ${regions.map(g => { const hs = newHouses(r).filter(h => h.region === g); return `<tr><td>${esc(g)}</td><td class="q">${r.chosen.filter(c => c.region === g).length}</td>
           <td class="q">${hs.length}</td><td class="q">${hs.reduce((a, h) => a + h.cp, 0)}</td></tr>`; }).join('')}</tbody></table>
@@ -1387,7 +1387,7 @@ function reportHtml(r) {
         <td style="color:${ok ? '#2f7d4f' : '#b3261e'}">${ok ? '충족' : '부족'}</td></tr>`; }).join('')}</tbody></table>`).join('')}</div>
     ${r.others.length ? `<h3>노드 말고 따로 구할 것</h3><p class="flow">${esc(r.others.map(o => `${o.label} ${fmt(o.qty)} (${o.reason})`).join(', '))}</p>` : ''}
     <h2 style="margin-top:18px">완성품별 모아야 할 원재료</h2>
-    <div class="cols">${r.expansion.filter(e => e.tree && e.tree.length).map(e => { const sc = e.scale > 1.005 ? e.scale : 1; return `<div class="keep"><h3>${esc(e.name)} ×${fmt(e.crafts * sc)}</h3>
+    <div class="cols">${r.expansion.filter(e => e.tree && e.tree.length).map(e => { const sc = scaled(e) ? e.scale : 1; return `<div class="keep"><h3>${esc(e.name)} ×${fmt(e.crafts * sc)}</h3>
       <table><tbody>${treeTotals(e.tree).map(([l, v]) => `<tr><td>${esc(l)}</td><td class="muted">${esc(v.how)}</td><td class="q">${fmt(v.qty * sc)}</td></tr>`).join('')}</tbody></table></div>`; }).join('')}</div>
   </section>`;
 
@@ -1449,7 +1449,7 @@ function exportPng(r) {
   const total = r.node_cp + r.house_cp, buy = r.houses.filter(h => !h.owned);
   const blocks = [
     { title: `검은사막 노드 플래너 · ${today()}`, size: 40, bold: true, lines: [`총 공헌도 ${total} (노드 ${r.node_cp} + 집 ${r.house_cp})${resText(r)} · 일꾼 ${r.chosen.length}명`] },
-    { title: '만들 것', lines: r.expansion.map(e => `${e.name} ×${e.crafts}${e.scale > 1.005 ? ` → ${fmt(e.crafts * e.scale)} 가능` : ''}${e.days > 1 ? ` / ${fmt(e.days)}일` : ' / 하루'}${e.priority === 'nice' ? ' (여유)' : ''}`) },
+    { title: '만들 것', lines: r.expansion.map(e => `${e.name} ×${e.crafts}${scaled(e) ? ` → ${fmt(e.crafts * e.scale)} 가능` : ''}${e.days > 1 ? ` / ${fmt(e.days)}일` : ' / 하루'}${e.priority === 'nice' ? ' (여유)' : ''}`) },
     { title: `일꾼 배치 (${r.chosen.length}명)`, lines: r.chosen.map(c => `[${c.region}] ${c.town_name} ${c.kind} → ${c.zone_name}  ·  ${c.yields.map(y => `${y.label} ${fmt(y.daily)}/일`).join(', ')}`) },
     ...(r.imperial ? [{ title: `황실 공방 ${r.imperial}명`, lines: ['육조거리 숙소'] }] : []),
     ...(r.extra && r.extra.length ? [{ title: `추가 일꾼 (농사용 등) ${r.extra.reduce((a, e) => a + e.n, 0)}명`, lines: [r.extra.map(e => `${e.town_name} ${e.n}`).join(', ')] }] : []),
@@ -1500,17 +1500,20 @@ function exportPng(r) {
   });
   c.toBlob(b => { download(`노드플래너_${today()}.png`, b); exMsg('지도 + 목록 이미지를 저장했습니다'); });
 }
+// 생산량 최대에서 입력 수량과 달라진 항목 (늘었거나, 노드로 다 못 채워 줄었거나)
+const scaled = e => e.scale !== undefined && Math.abs(e.scale - 1) > 0.005;
 // 생산량 최대: 항목마다 따로 늘림. 남은 공헌도가 있으면 노드가 바닥난 것, 없으면 예산을 다 쓴 것
 function scaleNote(r) {
   if (r.goal_req === 'max' && r.goal !== 'max')
     return `<p class="hint">공헌도 최소로 계산했습니다. 생산량 최대로 하려면 설정에서 <b>총 공헌도</b>를 넣으세요.</p>`;
   if (r.goal !== 'max') return '';
-  const grown = r.expansion.filter(e => e.scale !== undefined);
+  const grown = r.expansion.filter(e => e.scale !== undefined), cut = grown.filter(e => e.scale < 0.995);
   const bc = budgetCalc(), left = bc ? bc.avail - (r.node_cp + r.house_cp) : 0;
   const must = r.slots.filter(s => s.qty - s.nice > 0);
   const tight = must.length ? must.reduce((x, y) => (y.got / y.qty < x.got / x.qty ? y : x)) : null;
   return `<div class="panel" style="margin-top:12px"><h2>항목별 생산량 <small>입력 수량 → 가능 수량</small></h2>
-    <div class="nodelist">${grown.map(e => `<span class="chip" style="padding-right:10px">${esc(e.name)} <small>${e.crafts} →</small> <b>${fmt(e.crafts * e.scale)}</b> <small>×${e.scale.toFixed(1)}</small></span>`).join('')}</div>
+    <div class="nodelist">${grown.map(e => `<span class="chip" style="padding-right:10px">${esc(e.name)} <small>${e.crafts} →</small> <b${e.scale < 0.995 ? ' style="color:var(--bad)"' : ''}>${fmt(e.crafts * e.scale)}</b> <small>×${e.scale.toFixed(2)}</small></span>`).join('')}</div>
+    ${cut.length ? `<p class="hint" style="color:var(--bad)">노드로 다 못 채워 <b>${cut.length}개 항목</b>의 수량을 줄였습니다 (빨간 숫자). 입력 수량대로 만들려면 기간을 늘리거나, 모자란 재료를 '노드 + 손채집'으로 바꾸세요.</p>` : ''}
     <p class="hint">${left > 2 ? `공헌도가 ${left} 남았지만 더 늘릴 노드가 없습니다${tight ? ` (가장 빠듯한 재료: <b>${esc(tight.label)}</b>)` : ''}.` : '공헌도 예산을 거의 다 썼습니다.'}
       덜 늘어난 항목부터 키워서 한쪽으로 쏠리지 않게 했습니다.</p></div>`;
 }
@@ -1525,7 +1528,7 @@ function expansionHtml(r) {
   // 항목이 많으면 바로가기 (탭 줄 아래에 붙어 있음)
   const jump = r.expansion.length > 1 ? `<nav class="jump">${r.expansion.map((e, i) => `<a href="#exp-${i}">${esc(e.name.replace(' (직접 입력)', ''))}</a>`).join('')}</nav>` : '';
   return jump + r.expansion.map((e, idx) => {
-    const sc = e.scale !== undefined && e.scale > 1.005 ? e.scale : null, tree = e.tree || [];
+    const sc = scaled(e) ? e.scale : null, tree = e.tree || [];
     const qcols = sc ? `<th class="q">${fmt(e.crafts)}회</th><th class="q">${fmt(e.crafts * sc)}회 (가능)</th>` : `<th class="q">${fmt(e.crafts)}회</th>`;
     const qv = q => sc ? `<td class="q">${fmt(q)}</td><td class="q"><b>${fmt(q * sc)}</b></td>` : `<td class="q"><b>${fmt(q)}</b></td>`;
     const howTag = h => `<span class="how ${h === '노드' ? 'node' : ''}">${esc(h)}</span>`;

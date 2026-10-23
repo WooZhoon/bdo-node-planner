@@ -406,7 +406,8 @@ def _plan(body):
                          fixed_workers={IMPERIAL_TOWN: min(8, max(0, int(body.get("imperial_workers") or 0)))}
                          if IMPERIAL_TOWN else None,
                          goal="min" if body.get("goal") == "min" else "max",
-                         grow_parts=[g for _, g in grow], stock=stock, progress=on_progress)
+                         grow_parts=[g for _, g in grow], stock=stock, progress=on_progress,
+                         hand={si for si, (_, a, _) in enumerate(slots) if is_hand(body, a)})
     for (ei, _), sc in zip(grow, res["scales"]):
         expansion[ei]["scale"] = sc
     g = D["graph"]
@@ -423,10 +424,11 @@ def _plan(body):
         "scale": min(res["scales"], default=1.0), "scale_max": max(res["scales"], default=1.0), "goal": res["goal"], "goal_req": "min" if body.get("goal") == "min" else "max",
         "node_cp": res["node_cp"], "house_cp": res["house_cp"],
         # got = 노드 생산 + 보유분 하루 몫
-        "slots": [{"label": l, "qty": q, "got": got + stock.get(si, 0), "ids": list(a), "mode": "node", "nice": nice_slots.get(si, 0),
+        # qty: 수량을 줄였으면 줄인 뒤의 하루 필요량, base: 입력 수량 기준
+        "slots": [{"label": l, "qty": max(0.0, q - cut), "base": q, "got": got + stock.get(si, 0), "ids": list(a), "mode": "node", "nice": nice_slots.get(si, 0),
                    "stock": stock_n[si], "stock_daily": stock.get(si, 0), "hand": is_hand(body, a), "cat": slot_cat(a),
                    "items": [item_name(i) for i in a if i in plan.node_items(D)][:8]}
-                  for si, ((l, a, q), got) in enumerate(zip(slots, res["got"]))],
+                  for si, ((l, a, q), got, cut) in enumerate(zip(slots, res["got"], res.get("cut") or [0] * len(slots)))],
         "chosen": [{
             "zone": c["zone"], "zone_name": plan.zone_label(D, c["zone"]),
             "town": c["town"], "town_name": D["towns"][c["town"]]["name"], "region": REGION[c["town"]][0],

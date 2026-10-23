@@ -10,6 +10,7 @@
 목적: 투자 CP(노드+집) + 부족 벌점. --budget 이 있으면 CP 합 ≤ 예산
   goal="max" (생산량 최대, 예산 필요): 배율 T 를 더 둬서 필수 수량 × (1+T) 를 채우게 하고 T 에 큰 보상 →
   예산 안에서 레시피 비율 그대로 최대한 많이, 같은 생산량이면 CP 적게
+  노드로 다 못 채우면 반대로 항목 수량을 줄임 (배율 1 − D, D 에 벌점)
 """
 import time
 from collections import defaultdict
@@ -28,6 +29,11 @@ NICE_PENALTY = 10        # '여유' 재료 하나를 완전히 못 채울 때 �
 # 생산량 최대: 항목 수량 +100% 당 보상 (CP 상당) — (배율 구간 끝, 보상). 필수 부족 벌점(1000)보다 작아 부족을 만들며 늘리진 않음
 SCALE_SEGMENTS = [(1.0, 400), (3.0, 150), (float("inf"), 50)]
 SCALE_MAX = 50           # 배율 상한 (×51)
+# 생산량 최대에서 노드로 다 못 채우면 항목 수량을 줄임: 줄이는 벌점 (배율 구간 끝, 벌점). 늘리는 보상보다 커서 줄였다 늘렸다 하지 않고,
+# 많이 줄일수록 커져서 한 항목만 확 줄이기보다 고르게 줄임. 손채집 재료(부족 벌점 1000)로는 줄이지 않음
+SCALE_DOWN = [(0.5, 3000), (0.9, 5000)]
+# 생산량 최대에서 노드로 얻을 수 있는 필수 재료의 부족 벌점 → 부족을 남기기보다 수량을 줄임
+SHORTAGE_PENALTY_MAX = 100000
 
 
 class Model:
@@ -110,7 +116,7 @@ def pair_yields(d, slots, paths, towns_per_zone, zones_per_slot, kinds=plan.DEFA
 def solve(d, slots, owned=frozenset(), extra_beds=None, budget=None, towns_per_zone=3, zones_per_slot=6,
           paths_per_pair=5, time_limit=120, owned_houses=frozenset(), storage=True, base_storage=16,
           worker_kinds=plan.DEFAULT_KINDS, nice=None, lodge_eff_min=None, extra_workers=0, fixed_workers=None,
-          goal="min", grow_parts=None, stock=None, progress=None):
+          goal="min", grow_parts=None, stock=None, progress=None, hand=frozenset()):
     """slots: [(라벨, 허용 아이템 tuple, 하루 필요량)]
     storage: 창고 칸까지 계산할지. base_storage: 마을 기본 창고 칸 (KR 16, 가치 패키지면 32)
     worker_kinds: 쓸 일꾼 종류 (goblin/giant/human). 여러 개면 노드마다 생산량이 좋은 쪽
@@ -118,7 +124,8 @@ def solve(d, slots, owned=frozenset(), extra_beds=None, budget=None, towns_per_z
     extra_workers: 노드 말고 따로 둘 일꾼 수 (농사용 등, 지역 무관) — 숙소만 필요, 창고 계산 없음
     fixed_workers: 마을이 정해진 일꾼 {마을: 인원} (예: 황실 공방 — 육조거리) — 숙소만 필요
     stock: 칸별 보유분에서 하루에 꺼내 쓰는 양 {칸 번호: 하루 몫} — 그만큼은 노드 없이 채움 (보유 ÷ 소진 기간)
-    progress: 계산 중 지금까지 찾은 최선의 답 요약을 받는 함수 (시작 해, 더 나은 해를 찾을 때마다, 1초마다 갭)"""
+    progress: 계산 중 지금까지 찾은 최선의 답 요약을 받는 함수 (시작 해, 더 나은 해를 찾을 때마다, 1초마다 갭)
+    hand: 모자란 만큼 사람이 채울 칸 번호 — 생산량 최대에서 이 칸이 모자라도 수량을 줄이지 않음"""
     fixed_workers = {tk: n for tk, n in (fixed_workers or {}).items() if n > 0}
     nice = nice or {}
     st = [float((stock or {}).get(si, 0)) for si in range(len(slots))]
@@ -156,16 +163,23 @@ def solve(d, slots, owned=frozenset(), extra_beds=None, budget=None, towns_per_z
     a = dict(zip(pl, m.vars(len(pl), [1e-3] * len(pl))))  # 동점이면 일꾼 수 적게
     rl = [(p, i) for p, rs in routes.items() for i in range(len(rs))]
     r = dict(zip(rl, m.vars(len(rl), [0] * len(rl))))
-    s = m.vars(len(slots), [SHORTAGE_PENALTY / q for _, _, q in slots], hi=highspy.kHighsInf, integer=False)
+    tot = [sum(v["yields"].get(si, 0) for v in pairs.values()) for si in range(len(slots))]
+    grow = goal == "max" and budget is not None
+    s = m.vars(len(slots), [(SHORTAGE_PENALTY_MAX if grow and tot[si] > 0 and si not in hand else SHORTAGE_PENALTY) / q
+                            for si, (_, _, q) in enumerate(slots)], hi=highspy.kHighsInf, integer=False)
     # 생산량 최대: 항목(완성품·재료)마다 배율 T_j. 보상은 구간마다 줄어듦(×2까지 크게, ×4까지 중간, 그 뒤 작게) →
     # 덜 늘어난 항목부터 키워서 비율이 너무 한쪽으로 쏠리지 않고, 한 재료가 막혀도 다른 항목은 계속 늘어남
     base = [q - nice.get(si, 0) for si, (_, _, q) in enumerate(slots)]
     parts = [p_ for p_ in (grow_parts if grow_parts is not None else [{si: b for si, b in enumerate(base) if b > 0}]) if p_]
-    tot = [sum(v["yields"].get(si, 0) for v in pairs.values()) for si in range(len(slots))]
-    T, caps, seg_len = [], [], {}  # 항목별 [구간 변수], 배율 상한, 구간 변수별 길이
+    T, Dn, caps, seg_len = [], [], [], {}  # 항목별 [늘리는 구간 변수], [줄이는 구간 변수], 배율 상한, 구간 변수별 길이
     top = [q for _, _, q in slots]  # 칸별로 늘어날 수 있는 최대 필요량 (생산량 계수 자르기용)
-    if goal == "max" and budget is not None:
+    if grow:
         for part in parts:
+            down, lo = [], 0.0
+            for hi_, pen in SCALE_DOWN:
+                down.append(m.vars(1, [pen], hi=hi_ - lo, integer=False)[0])
+                lo = hi_
+            Dn.append(down)
             cap = min([float(SCALE_MAX)] + [max(0.0, (tot[si] - slots[si][2]) / b) for si, b in part.items() if b > 0])
             seg, lo = [], 0.0
             for hi_, rew in SCALE_SEGMENTS:
@@ -207,7 +221,8 @@ def solve(d, slots, owned=frozenset(), extra_beds=None, budget=None, towns_per_z
         # 보유분 하루 몫(st)은 미리 채워진 것으로 → 노드가 채울 양은 그만큼 적음 (음수면 늘리기 전까진 노드 불필요)
         m.row(q - st[si], inf, [(a[p], min(v["yields"][si], max(0.0, top[si] - st[si]))) for p, v in pairs.items() if si in v["yields"]] + [(s[si], 1)]
               + ([(sn[si], 1)] if si in sn else [])
-              + [(t_, -part[si]) for part, seg in zip(parts, T) if si in part for t_ in seg])
+              + [(t_, -part[si]) for part, seg in zip(parts, T) if si in part for t_ in seg]
+              + [(d_, part[si]) for part, down in zip(parts, Dn) if si in part for d_ in down])
     # 노드당 일꾼 1명, 노드·마을 투자 필요
     by_zone = defaultdict(list)
     for (zk, tk) in pl:
@@ -302,7 +317,7 @@ def solve(d, slots, owned=frozenset(), extra_beds=None, budget=None, towns_per_z
     m.h.setOptionValue("mip_rel_gap", MIP_GAP)
     t1 = time.perf_counter()
     if progress:
-        watch_progress(m.h, progress, vec, t1, cost, x, nodes, hcost, buy, a, pl, s, slots, T)
+        watch_progress(m.h, progress, vec, t1, cost, x, nodes, hcost, buy, a, pl, s, slots, T, Dn)
     m.h.run()
     sol = m.h.getSolution().col_value
     status = m.h.modelStatusToString(m.h.getModelStatus())
@@ -342,12 +357,15 @@ def solve(d, slots, owned=frozenset(), extra_beds=None, budget=None, towns_per_z
         "storage": storage_use, "got": got, "greedy_cp": start["cp"],
         "extra": {tk: round(sol[i]) for tk, i in ex.items() if sol[i] > 0.5},
         "fixed": fixed_workers,
-        "scales": [1 + sum(sol[t_] for t_ in seg) for seg in T] if T else [1.0] * len(parts),
+        "scales": [1 + sum(sol[t_] for t_ in seg) - sum(sol[d_] for d_ in down) for seg, down in zip(T, Dn)]
+        if T else [1.0] * len(parts),
+        # 칸별로 수량을 줄여 덜 필요해진 하루 몫
+        "cut": [sum(part.get(si, 0) * sum(sol[d_] for d_ in down) for part, down in zip(parts, Dn)) for si in range(len(slots))],
         "goal": "max" if T else "min",
     }
 
 
-def watch_progress(h, progress, start, t1, cost, x, nodes, hcost, buy, a, pl, s, slots, T):
+def watch_progress(h, progress, start, t1, cost, x, nodes, hcost, buy, a, pl, s, slots, T, Dn):
     """계산 중 진행 알림: 시작 해(그리디)를 먼저 보내고, HiGHS 가 더 나은 해를 찾을 때마다 + 1초마다(갭·시간) 보냄"""
     state = {"found": 0, "last": 0.0, "best": None}
 
@@ -356,7 +374,8 @@ def watch_progress(h, progress, start, t1, cost, x, nodes, hcost, buy, a, pl, s,
         return {"node_cp": sum(cost[v] for v in nodes if cost[v] and on(x[v])),
                 "house_cp": sum(hcost[k] for bv in buy.values() for k, i in bv.items() if hcost[k] and on(i)),
                 "workers": sum(1 for p in pl if on(a[p])),
-                "scale": min((1 + sum(sol[t_] for t_ in seg) for seg in T), default=1.0),
+                "scale": min((1 + sum(sol[t_] for t_ in seg) - sum(sol[d_] for d_ in down) for seg, down in zip(T, Dn)),
+                             default=1.0),
                 "short": sum(1 for si, (_, _, q) in enumerate(slots) if sol[s[si]] > q * 1e-3),
                 "zones": sorted({p[0] for p in pl if on(a[p])}),
                 "invested": [v for v in nodes if cost[v] and on(x[v])]}
