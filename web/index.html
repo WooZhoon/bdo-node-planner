@@ -1322,15 +1322,20 @@ function reportHtml(r) {
   const workerTable = cs => `<table><thead><tr><th>#</th><th>일꾼</th><th>노드</th><th>하루 생산</th></tr></thead><tbody>${cs.map(c => `<tr><td class="n">${num.get(c)}</td>
     <td>${esc(c.kind)}</td><td><b>${esc(c.zone_name)}</b></td><td>${esc(c.yields.map(y => `${y.label} ${fmt(y.daily)}`).join(', '))}</td></tr>`).join('')}</tbody></table>`;
   const houseTable = hs => `<table><thead><tr><th>집</th><th>용도</th><th class="q">CP</th><th>비고</th></tr></thead><tbody>${hs.map(h => `<tr><td>${esc(h.name)}</td>
-    <td>${esc(useText(h))}${h.reserved ? ' · 창고용' : ''}</td><td class="q">${h.cp}</td><td class="muted">${esc(h.note || '')}</td></tr>`).join('')}</tbody></table>`;
+    <td>${esc(useText(h))}${h.reserved ? ' · 창고용' : ''}</td><td class="q">${h.owned ? '보유' : h.cp}</td><td class="muted">${esc(h.note || '')}</td></tr>`).join('')}</tbody></table>`;
   // 마을 하나: 일꾼 / 그 일꾼들이 쓰는 투자 노드 / 집
   const townBlock = (name, cs, inv, hs) => {
     const kinds = Object.entries(cs.reduce((a, c) => (a[c.kind] = (a[c.kind] || 0) + 1, a), {})).map(([k, n]) => `${k} ${n}`).join('·');
-    const newH = hs.filter(h => !h.reserved), resH = hs.filter(h => h.reserved);
+    const newH = hs.filter(h => !h.reserved && !h.owned), resH = hs.filter(h => h.reserved);
+    // 침대: 기본 + 추가 숙소 입력 + 보유 집 + 새 집 (일꾼 수가 어디 침대로 맞는지)
+    const b = (r.beds || []).find(x => x.town_name === name);
+    const bedText = b ? `침대 ${[['기본', b.base], ['추가 숙소', b.input], ['보유 집', b.owned], ['새 집', b.new]].filter(([, n]) => n).map(([k, n]) => `${k} ${n}`).join(' + ')} = ${b.base + b.input + b.owned + b.new}`
+      + (b.workers > cs.length ? ` (농사·공방 일꾼 ${b.workers - cs.length}명 포함 ${b.workers}명)` : '') : '';
     const info = [cs.length ? `일꾼 ${cs.length}명${kinds ? ` (${kinds})` : ''}` : '', inv.length ? `노드 ${inv.length}개 ${inv.reduce((a, n) => a + n.cp, 0)} CP` : '',
       newH.length ? `새 집 ${newH.length}채 ${newH.reduce((a, h) => a + h.cp, 0)} CP` : '', resH.length ? `창고용 ${resH.length}채` : ''].filter(Boolean).join(' · ');
     return `<div class="town"><h3>${esc(name)} <small>${info}</small></h3>
       ${cs.length ? workerTable(cs) : ''}
+      ${bedText ? `<p class="flow"><span class="muted">${esc(bedText)}</span></p>` : ''}
       ${inv.length ? `<p class="flow"><span class="muted">투자할 노드</span> ${esc(inv.map(n => `${n.name}(${n.cp})`).join(', '))}</p>` : ''}
       ${hs.length ? houseTable(hs) : ''}</div>`;
   };
@@ -1371,10 +1376,10 @@ function reportHtml(r) {
       return `<div><div class="maptitle">${esc(ts.join(' · '))}</div>${reportMap(r, { focus: list, houses: hs.filter(h => ts.includes(h.town_name)), W: 490, H: 400, labels: 'name' })}</div>`; }).join('')}</div>`;
   };
   const regionPages = regions.map(g => {
-    const cs = r.chosen.filter(c => c.region === g), hs = r.houses.filter(h => h.region === g && !h.owned);
+    const cs = r.chosen.filter(c => c.region === g), hs = r.houses.filter(h => h.region === g && (!h.owned || h.use === '숙소'));  // 보유 집도 숙소로 쓰면 표시 (침대 수가 맞게)
     const inv = r.invested.filter(n => nodeRegion.get(n.k) === g);
     return `<section class="page">
-      <h2>${esc(g)} <small>일꾼 ${cs.length}명 · 투자 노드 ${inv.length}개 ${inv.reduce((a, n) => a + n.cp, 0)} CP · 새로 살 집 ${hs.filter(h => !h.reserved).length}채</small></h2>
+      <h2>${esc(g)} <small>일꾼 ${cs.length}명 · 투자 노드 ${inv.length}개 ${inv.reduce((a, n) => a + n.cp, 0)} CP · 새로 살 집 ${hs.filter(h => !h.reserved && !h.owned).length}채</small></h2>
       ${regionMaps(cs, hs)}
       ${legend()}
       ${[...new Set([...cs.map(c => c.town_name), ...hs.map(h => h.town_name)])].sort((a, b) => ord(META.town_order, a) - ord(META.town_order, b)).map(t => townBlock(t, cs.filter(c => c.town_name === t),

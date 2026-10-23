@@ -477,6 +477,19 @@ def _plan(body):
         "extra": [{"town_name": D["towns"][tk]["name"], "region": REGION[tk][0], "n": n} for tk, n in sorted(res["extra"].items(), key=lambda x: town_key(x[0]))],
         "imperial": res["fixed"].get(IMPERIAL_TOWN, 0) if IMPERIAL_TOWN else 0,
     })
+    # 마을별 침대 내역 (보고서에서 일꾼 수가 어디 침대로 맞는지 보이게): 기본 + 추가 숙소 입력 + 보유 집 + 새 집
+    lodged = defaultdict(lambda: [0, 0])  # tk -> [보유 집 침대, 새 집 침대]
+    for h in res["houses"]:
+        if h["use"] == "숙소":
+            lodged[h["town"]][0 if h["key"] in owned_houses else 1] += h["beds"]
+    staff = defaultdict(int)
+    for c in res["chosen"]:
+        staff[c["town"]] += 1
+    for tk, n in list(res["extra"].items()) + list((res["fixed"] or {}).items()):
+        staff[tk] += n
+    out["beds"] = [{"town_name": D["towns"][tk]["name"], "workers": n, "base": D["towns"][tk]["base_beds"],
+                    "input": beds.get(tk, 0), "owned": lodged[tk][0], "new": lodged[tk][1]}
+                   for tk, n in sorted(staff.items(), key=lambda x: town_key(x[0])) if n]
     return out
 
 
