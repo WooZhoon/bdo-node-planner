@@ -294,6 +294,11 @@ main.tabbed .block.collapsed .bbody { display: block; }
           <p class="hint" style="margin:4px 0 0">숙소 자리만 잡아줍니다. 마을 기본 침대(마을당 1)가 비어 있다고 보고 계산하니, 이미 다른 일꾼이 쓰고 있으면 '마을별 추가 숙소'로 조정하세요.</p>
         </div>
         <div class="field">
+          <label for="stockDays">보유 재료를 다 쓰는 기간 (일)</label>
+          <input type="number" id="stockDays" min="1" value="180" style="width:90px">
+          <p class="hint" style="margin:4px 0 0">재료 탭에서 노드 재료마다 '보유' 개수를 넣으면, 그 개수를 이 기간에 나눠 하루에 조금씩 쓴다고 보고 모자란 만큼만 노드로 채웁니다. 다른 재료가 병목이라 덜 만들게 되면 보유분만으로 충분해 그 재료 노드는 빠집니다. <span id="stockInfo"></span></p>
+        </div>
+        <div class="field">
           <label for="lodgeEff">창고 효율 n 이상인 집은 숙소로 안 씀</label>
           <input type="number" id="lodgeEff" min="0" step="0.5" placeholder="비우면 적용 안 함" style="width:140px">
           <p class="hint" style="margin:4px 0 0">기본 6: 아침의 나라·신규 지역의 창고 좋은 집 46채 (시트에 '숙소'라고 적혀 있어도 창고 우선)</p>
@@ -404,7 +409,7 @@ const S = loadState();
 
 function loadState() {
   const def = { products: [], materials: [], owned: [], owned_houses: [], beds: {}, budget: '', time: 60, days: 1,
-    storage: true, value_pack: false, workers: 'auto', sourcing: {}, resource_pct: 0, collapsed: {}, house_checks: {}, goal: 'max', lodge_eff_min: 6, extra_workers: 0, imperial_workers: 4, theme: '' };
+    storage: true, value_pack: false, workers: 'auto', sourcing: {}, resource_pct: 0, collapsed: {}, house_checks: {}, goal: 'max', lodge_eff_min: 6, extra_workers: 0, imperial_workers: 4, theme: '', stock: {}, stock_days: 180 };
   let st;
   try { st = Object.assign(def, JSON.parse(localStorage.getItem('bdo-planner') || '{}')); } catch { st = def; }
   // 사용자 결정(창고 우선): 창고 효율 6 이상은 숙소로 안 씀 — 이미 저장된 설정에도 한 번만 적용
@@ -584,6 +589,9 @@ function renderSettings() {
   $('#resourcePct').value = S.resource_pct;
   $('#lodgeEff').value = S.lodge_eff_min;
   $('#extraWorkers').value = S.extra_workers;
+  $('#stockDays').value = S.stock_days;
+  const nStock = Object.keys(S.stock).length;
+  $('#stockInfo').innerHTML = nStock ? `보유 입력 ${nStock}종 · <button class="link" id="stockReset">모두 지우기</button>` : '';
   $('#goal').value = S.goal;
   $('#imperialWorkers').value = S.imperial_workers;
   $('#storageOn').checked = S.storage; $('#valuePack').checked = S.value_pack; $('#workerKinds').value = S.workers;
@@ -603,6 +611,7 @@ function renderSettings() {
   if (S.lodge_eff_min !== '') parts.push(`효율 ${S.lodge_eff_min}↑ 숙소 제외`);
   if (S.extra_workers) parts.push(`추가 일꾼 ${S.extra_workers}`);
   if (S.imperial_workers) parts.push(`황실 공방 ${S.imperial_workers}`);
+  if (nStock) parts.push(`보유 재료 ${nStock}종(${S.stock_days}일)`);
   const nSrc = Object.keys(S.sourcing).length;
   if (nSrc) parts.push(`조달 지정 ${nSrc}`);
   if (S.workers !== 'auto') parts.push({ goblin: '고블린만', giant: '거인만', 'goblin,giant': '고블린+거인' }[S.workers]);
@@ -623,6 +632,7 @@ $('#storageOn').onchange = e => { S.storage = e.target.checked; save(); renderSe
 $('#valuePack').onchange = e => { S.value_pack = e.target.checked; save(); };
 $('#imperialWorkers').onchange = e => { S.imperial_workers = Math.min(8, Math.max(0, Math.round(+e.target.value) || 0)); save(); renderSettings(); };
 $('#goal').onchange = e => { S.goal = e.target.value; save(); renderSettings(); };
+$('#stockDays').onchange = e => { S.stock_days = Math.max(1, Math.round(+e.target.value) || 180); save(); renderSettings(); };
 $('#extraWorkers').onchange = e => { S.extra_workers = Math.max(0, Math.round(+e.target.value) || 0); save(); renderSettings(); };
 $('#lodgeEff').onchange = e => { S.lodge_eff_min = e.target.value === '' ? '' : Math.max(0, +e.target.value); save(); renderSettings(); };  // renderSettings 가 예산 내역도 다시 계산
 $('#resourcePct').onchange = e => { S.resource_pct = Math.min(100, Math.max(0, +e.target.value || 0)); save(); renderSettings(); };
@@ -710,6 +720,18 @@ document.addEventListener('change', e => {
   save(); renderSettings();
   const b = $('#runBtn'); b.textContent = '다시 계산하기 (조달 방법 바뀜)';
 });
+document.addEventListener('change', e => {
+  if (!e.target.classList.contains('stockIn')) return;
+  const n = Math.max(0, Math.round(+e.target.value) || 0);
+  if (n) S.stock[e.target.dataset.k] = n; else delete S.stock[e.target.dataset.k];
+  save(); renderSettings();
+  $('#runBtn').textContent = '다시 계산하기 (보유 재료 바뀜)';
+});
+document.addEventListener('click', e => {
+  if (e.target.id !== 'stockReset') return;
+  S.stock = {}; save(); renderSettings();
+  $('#runBtn').textContent = '다시 계산하기 (보유 재료 바뀜)';
+});
 document.addEventListener('click', e => {
   if (e.target.id !== 'srcReset') return;
   S.sourcing = {}; save(); renderSettings();
@@ -728,7 +750,8 @@ $('#runBtn').onclick = async () => {
     const res = await API.call('POST', '/api/plan', { products: S.products, materials: S.materials, owned: S.owned, owned_houses: S.owned_houses,
         beds: S.beds, budget: budgetCalc() ? budgetCalc().avail : '', time: S.time, days: S.days, storage: S.storage, value_pack: S.value_pack,
         worker_kinds: S.workers === 'auto' ? null : S.workers.split(','), sourcing: S.sourcing, resource_pct: S.resource_pct, lodge_eff_min: S.lodge_eff_min,
-        reserved_houses: reservedHouses(), extra_workers: S.extra_workers, imperial_workers: S.imperial_workers, goal: S.goal });
+        reserved_houses: reservedHouses(), extra_workers: S.extra_workers, imperial_workers: S.imperial_workers, goal: S.goal,
+        stock: S.stock, stock_days: S.stock_days });
     if (!res.ok) throw new Error(res.data && res.data.error || `서버 오류 ${res.status}`);
     LAST = res.data; LAST.days = S.days; LAST.time_limit = S.time; renderResults(LAST);
   } catch (err) {
@@ -864,10 +887,13 @@ function renderResults(r) {
     <div class="panel">
       <h2>재료 충족 <small>하루 기준 · 부족한 재료부터</small></h2>
       ${[...r.slots].sort((x, y) => covered(x.got, x.qty - x.nice) - covered(y.got, y.qty - y.nice) || x.got / x.qty - y.got / y.qty).map(s => { const ok = covered(s.got, s.qty); const pct = Math.min(100, s.got / s.qty * 100);
-        return `<div class="slot"><div class="slot-head"><span>${esc(s.label)} ${srcSelect(s.ids, s.mode)}</span>
+        const sk = s.ids.join(',');
+        return `<div class="slot"><div class="slot-head"><span>${esc(s.label)} ${srcSelect(s.ids, s.mode)}
+          <label style="font-size:12px;color:var(--muted);margin-left:6px">보유 <input type="number" class="stockIn" data-k="${sk}" min="0" value="${S.stock[sk] || ''}" placeholder="0" style="width:90px;padding:2px 6px;font-size:12px"></label></span>
           <span class="${ok ? '' : (covered(s.got, s.qty - s.nice) ? '' : 'bad')}">${fmt(s.got)} / ${fmt(s.qty)}${s.nice ? ` <small>(여유 ${fmt(s.nice)})</small>` : ''}${ok ? '' : (covered(s.got, s.qty - s.nice) ? ' <small>여유분 일부</small>' : ' 부족')}</span></div>
           <div class="bar ${ok ? '' : 'bad'}"><i style="width:${pct}%"></i></div>
-          ${s.items.length > 1 ? `<div class="slot-items">${esc(s.items.join(', '))}</div>` : ''}</div>`; }).join('')}
+          ${s.items.length > 1 ? `<div class="slot-items">${esc(s.items.join(', '))}</div>` : ''}
+          ${s.stock ? `<div class="slot-items">보유 ${fmt(s.stock)}개 → 하루 ${fmt(s.stock_daily)}개씩 (${fmt(s.stock / s.stock_daily)}일) + 노드 생산 ${fmt(s.got - s.stock_daily)}</div>` : ''}</div>`; }).join('')}
     </div>
     ${othersHtml(r)}`;
   $('#resRecipe').innerHTML = expansionHtml(r);

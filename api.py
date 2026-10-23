@@ -62,6 +62,7 @@ def meta():
 
 _max_daily = {}
 BOTTLENECK_SLACK = 0.95
+STOCK_DAYS = 180  # 보유 재료를 다 쓰는 기간 기본값 (사용자: 약 6개월)
 
 
 def max_daily(accept, kinds):
@@ -299,6 +300,11 @@ def _plan(body):
     owned = {int(k) for k in body.get("owned", [])}
     beds = {int(tk): int(n) for tk, n in (body.get("beds") or {}).items() if int(n)}
     budget = body.get("budget")
+    # 보유 재료: {아이템 ID 들(쉼표): 개수} → 소진 기간(기본 180일)에 나눠 하루 몫만큼 노드 없이 채움
+    stock_days = max(1, int(body.get("stock_days") or STOCK_DAYS))
+    stock_n = [sum(int(v) for k, v in (body.get("stock") or {}).items()
+                   if int(v or 0) > 0 and {int(i) for i in str(k).split(",")} <= set(a)) for _, a, _ in slots]
+    stock = {si: n / stock_days for si, n in enumerate(stock_n) if n}
     res = optimize.solve(D, slots, owned=owned, extra_beds=beds,
                          budget=int(budget) if budget not in (None, "") else None,
                          time_limit=float(body.get("time", 60)),
@@ -313,7 +319,7 @@ def _plan(body):
                          fixed_workers={IMPERIAL_TOWN: min(8, max(0, int(body.get("imperial_workers") or 0)))}
                          if IMPERIAL_TOWN else None,
                          goal="min" if body.get("goal") == "min" else "max",
-                         grow_parts=[g for _, g in grow])
+                         grow_parts=[g for _, g in grow], stock=stock)
     for (ei, _), sc in zip(grow, res["scales"]):
         expansion[ei]["scale"] = sc
     g = D["graph"]
@@ -329,7 +335,9 @@ def _plan(body):
         # 생산량 최대: 필수 항목 수량 × scale 까지 됨 (예산 없으면 goal=min 으로 계산됨)
         "scale": min(res["scales"], default=1.0), "scale_max": max(res["scales"], default=1.0), "goal": res["goal"], "goal_req": "min" if body.get("goal") == "min" else "max",
         "node_cp": res["node_cp"], "house_cp": res["house_cp"],
-        "slots": [{"label": l, "qty": q, "got": got, "ids": list(a), "mode": "node", "nice": nice_slots.get(si, 0),
+        # got = 노드 생산 + 보유분 하루 몫
+        "slots": [{"label": l, "qty": q, "got": got + stock.get(si, 0), "ids": list(a), "mode": "node", "nice": nice_slots.get(si, 0),
+                   "stock": stock_n[si], "stock_daily": stock.get(si, 0),
                    "items": [item_name(i) for i in a if i in plan.node_items(D)][:8]}
                   for si, ((l, a, q), got) in enumerate(zip(slots, res["got"]))],
         "chosen": [{

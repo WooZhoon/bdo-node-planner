@@ -110,15 +110,17 @@ def pair_yields(d, slots, paths, towns_per_zone, zones_per_slot, kinds=plan.DEFA
 def solve(d, slots, owned=frozenset(), extra_beds=None, budget=None, towns_per_zone=3, zones_per_slot=6,
           paths_per_pair=5, time_limit=120, owned_houses=frozenset(), storage=True, base_storage=16,
           worker_kinds=plan.DEFAULT_KINDS, nice=None, lodge_eff_min=None, extra_workers=0, fixed_workers=None,
-          goal="min", grow_parts=None):
+          goal="min", grow_parts=None, stock=None):
     """slots: [(라벨, 허용 아이템 tuple, 하루 필요량)]
     storage: 창고 칸까지 계산할지. base_storage: 마을 기본 창고 칸 (KR 16, 가치 패키지면 32)
     worker_kinds: 쓸 일꾼 종류 (goblin/giant/human). 여러 개면 노드마다 생산량이 좋은 쪽
     nice: 칸별 '여유' 수량 {칸 번호: 수량}. 필요량 중 이만큼은 부족해도 벌점이 작음 (남는 공헌도로 되는 만큼)
     extra_workers: 노드 말고 따로 둘 일꾼 수 (농사용 등, 지역 무관) — 숙소만 필요, 창고 계산 없음
-    fixed_workers: 마을이 정해진 일꾼 {마을: 인원} (예: 황실 공방 — 육조거리) — 숙소만 필요"""
+    fixed_workers: 마을이 정해진 일꾼 {마을: 인원} (예: 황실 공방 — 육조거리) — 숙소만 필요
+    stock: 칸별 보유분에서 하루에 꺼내 쓰는 양 {칸 번호: 하루 몫} — 그만큼은 노드 없이 채움 (보유 ÷ 소진 기간)"""
     fixed_workers = {tk: n for tk, n in (fixed_workers or {}).items() if n > 0}
     nice = nice or {}
+    st = [float((stock or {}).get(si, 0)) for si in range(len(slots))]
     # 창고 효율이 이 값 이상인 집은 숙소로 쓰지 않음 (창고용으로 아껴둠, 창고로는 씀)
     lodge_ok = lambda h: h["beds"] and (lodge_eff_min is None or h.get("eff", 0) < lodge_eff_min)  # noqa: E731
     t0 = time.perf_counter()
@@ -201,7 +203,8 @@ def solve(d, slots, owned=frozenset(), extra_beds=None, budget=None, towns_per_z
     # 재료 필요량 (부족분 s 허용)
     for si, (_, _, q) in enumerate(slots):
         # 계수를 필요량으로 잘라도 해는 같고 LP 하한이 훨씬 강해짐 (생산량 최대면 늘어날 수 있는 최대 필요량으로)
-        m.row(q, inf, [(a[p], min(v["yields"][si], top[si])) for p, v in pairs.items() if si in v["yields"]] + [(s[si], 1)]
+        # 보유분 하루 몫(st)은 미리 채워진 것으로 → 노드가 채울 양은 그만큼 적음 (음수면 늘리기 전까진 노드 불필요)
+        m.row(q - st[si], inf, [(a[p], min(v["yields"][si], max(0.0, top[si] - st[si]))) for p, v in pairs.items() if si in v["yields"]] + [(s[si], 1)]
               + ([(sn[si], 1)] if si in sn else [])
               + [(t_, -part[si]) for part, seg in zip(parts, T) if si in part for t_ in seg])
     # 노드당 일꾼 1명, 노드·마을 투자 필요
@@ -250,7 +253,7 @@ def solve(d, slots, owned=frozenset(), extra_beds=None, budget=None, towns_per_z
               + [(bv[k], hcost[k]) for bv in buy.values() for k in bv if hcost[k]])
 
     start = greedy(d, slots, pairs, routes, cost, extra_beds, budget, hcost, storage, base_storage, owned_houses, lodge_ok,
-                   extra_workers, house_towns, fixed_workers, grow_parts=parts if T else None)
+                   extra_workers, house_towns, fixed_workers, grow_parts=parts if T else None, stock=st)
     vec = np.zeros(m.n)
     for v in start["invested"]:
         if v in x:
@@ -281,8 +284,8 @@ def solve(d, slots, owned=frozenset(), extra_beds=None, budget=None, towns_per_z
         vec[s[si]] = short - take
     if T:
         # 시작 해의 배율: 칸별 남는 생산량(계수 자른 값 기준)을 항목들이 같이 나눠 쓰도록 고르게 올림
-        got = [sum(min(pairs[p]["yields"][si], top[si]) for p in start["chosen"] if si in pairs[p]["yields"])
-               for si in range(len(slots))]
+        got = [sum(min(pairs[p]["yields"][si], max(0.0, top[si] - st[si])) for p in start["chosen"] if si in pairs[p]["yields"])
+               + st[si] for si in range(len(slots))]
         left = [max(0.0, g - q) for g, (_, _, q) in zip(got, slots)]
         for j, t in enumerate(start_scales(parts, left, caps)):
             for v in T[j]:  # 앞 구간부터 채움
@@ -404,12 +407,14 @@ def town_infra(t, workers, n_items, hcost, extra_beds, storage, base_storage, ow
 
 
 def greedy(d, slots, pairs, routes, cost, extra_beds, budget, hcost, storage, base_storage, owned_houses, lodge_ok,
-           extra_workers=0, house_towns=(), fixed_workers=None, grow_parts=None, grow_step=0.25, grow_levels=40):
+           extra_workers=0, house_towns=(), fixed_workers=None, grow_parts=None, grow_step=0.25, grow_levels=40, stock=None):
     """시작 해: 남은 필요량 대비 '추가 공헌도(경로 중 아직 투자 안 한 노드 + 마을 집 비용 증가분)' 효율이 좋은 노드부터 추가.
     grow_parts(생산량 최대): 필요량을 채운 뒤 남는 예산으로 항목 수량을 grow_step(+25%)씩 올려 가며 계속 추가 →
     솔버가 시간 안에 더 나은 해를 못 찾아도(브라우저판처럼 느릴 때) 늘린 결과가 나옴"""
     invested = {v for v, c in cost.items() if c == 0}
-    rem = [q for _, _, q in slots]
+    st = stock or [0.0] * len(slots)
+    # 남은 필요량. 보유분이 더 많으면 음수로 두어, 늘릴 때(2단계) 보유분 여유부터 씀
+    rem = [q - st[si] for si, (_, _, q) in enumerate(slots)]
     workers, items = defaultdict(int), defaultdict(set)
     infra = {}
     chosen, used_zones, total = {}, set(), 0
@@ -432,7 +437,7 @@ def greedy(d, slots, pairs, routes, cost, extra_beds, budget, hcost, storage, ba
             zk, tk = p
             if zk in used_zones:
                 continue
-            gain = sum(min(y, rem[si]) / slots[si][2] for si, y in info["yields"].items())
+            gain = sum(min(y, max(0.0, rem[si])) / slots[si][2] for si, y in info["yields"].items())
             if gain <= 1e-9:
                 continue
             k, rc = min(((i, sum(cost[v] for v in set(rt) if v not in invested)) for i, rt in enumerate(routes[p])),
@@ -456,7 +461,7 @@ def greedy(d, slots, pairs, routes, cost, extra_beds, budget, hcost, storage, ba
         infra[tk] = new
         total += c
         for si, y in pairs[p]["yields"].items():
-            rem[si] = max(0.0, rem[si] - y)
+            rem[si] = min(rem[si], max(0.0, rem[si] - y))
         return True
 
     while any(v > 1e-9 for v in rem) and add_best():
@@ -494,5 +499,5 @@ def greedy(d, slots, pairs, routes, cost, extra_beds, budget, hcost, storage, ba
         inf_["workers"], inf_["items"] = node_workers.get(tk, 0), items[tk]
     # 부족분은 원래 필요량 기준 (2단계에서 올린 필요량 말고)
     got = [sum(pairs[p]["yields"].get(si, 0) for p in chosen) for si in range(len(slots))]
-    short = [max(0.0, q - g) for (_, _, q), g in zip(slots, got)]
+    short = [max(0.0, q - g - st[si]) for si, ((_, _, q), g) in enumerate(zip(slots, got))]
     return {"invested": invested, "chosen": chosen, "short": short, "cp": total, "infra": infra, "extra": dict(extra)}

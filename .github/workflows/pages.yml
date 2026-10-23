@@ -24,6 +24,8 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 5  # desktop.json 의 '바뀐 내용'(최근 커밋 제목)
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"

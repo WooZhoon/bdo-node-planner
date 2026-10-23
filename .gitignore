@@ -5,6 +5,9 @@ __pycache__/
 data/raw/
 # CI(.github/workflows/pages.yml)가 만듦
 site/
+# scripts/build_exe.py 가 만듦 (exe 는 Releases 로)
+dist/
+build/
 # 개인 자료 (저장소에 올리지 않음)
 노드 플래너.pdf
 # 작업 기록 (개인용, 공개 저장소에 올리지 않음 — 사용자 결정 2026-10-22)

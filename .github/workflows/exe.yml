@@ -1,0 +1,35 @@
+# PC 실행 파일(dist/bdo-node-planner.exe)을 만들어 GitHub Releases 에 올림.
+# 코드·데이터만 바뀐 업데이트는 필요 없음 (exe 가 사이트의 desktop.zip 을 받아 씀).
+# 라이브러리가 바뀌어 desktop/launcher.py 의 EXE_VERSION 을 올렸을 때: exe-v<번호> 태그를 push 하거나 수동 실행
+name: Build exe
+
+on:
+  push:
+    tags: ["exe-v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: python -m pip install -r requirements.txt pyinstaller
+      - run: python -X utf8 scripts/build_exe.py
+      - name: Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          [[ "$tag" == exe-v* ]] || tag="exe-v$(grep -oP '^EXE_VERSION = \K\d+' desktop/launcher.py)"
+          gh release view "$tag" >/dev/null 2>&1 || gh release create "$tag" --title "PC 실행 파일 $tag" \
+            --notes "bdo-node-planner.exe 를 받아 실행하세요. 실행할 때 새 데이터·코드가 있으면 알아서 물어봅니다."
+          gh release upload "$tag" dist/bdo-node-planner.exe --clobber
