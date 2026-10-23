@@ -2,6 +2,10 @@
 
   .venv/Scripts/python -X utf8 server.py
 """
+import json
+import os
+from pathlib import Path
+
 from flask import Flask, jsonify, request, send_from_directory
 
 import api
@@ -21,7 +25,13 @@ def meta():
 
 @app.post("/api/plan")
 def plan_api():
-    return jsonify(api.plan_api(request.get_json(force=True)))
+    body = request.get_json(force=True)
+    # 개발용: PLANNER_DUMP=폴더 로 켜면 계산 요청을 그대로 저장 (scripts/check_cases.py 테스트 케이스로 씀)
+    if os.environ.get("PLANNER_DUMP"):
+        out = Path(os.environ["PLANNER_DUMP"])
+        out.mkdir(parents=True, exist_ok=True)
+        (out / "last_plan.json").write_text(json.dumps(body, ensure_ascii=False), encoding="utf-8")
+    return jsonify(api.plan_api(body))
 
 
 @app.get("/api/progress")

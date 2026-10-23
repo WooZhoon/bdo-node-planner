@@ -1002,7 +1002,7 @@ function renderResults(r) {
       <p class="hint" style="margin:6px 0 0">버튼을 누르면 그 재료 노드는 그대로 최대한 잡고, 기간은 늘리지 않고, 남는 양은 손채집으로 보여줍니다 (만들 것 탭 보유 재료에서 '노드로만'으로 되돌릴 수 있음).</p></div>` : ''}
     ${r.expansion.some(e => e.cut) ? `<div class="panel" style="margin-top:12px;border-color:var(--bad)"><b>병목으로 수량을 줄인 항목</b>
       ${r.expansion.filter(e => e.cut).map(e => `<p class="hint" style="margin:6px 0 0">${esc(e.name)} ${fmt(e.crafts)} → <b style="color:var(--bad)">${fmt(e.crafts * e.scale)}</b>: ${e.cut.label
-        ? `<b>${esc(e.cut.label)}</b> — 노드를 다 돌려도 하루 최대 약 ${fmt(e.cut.per_day)}개 · 줄인 수량 기준 하루 ${fmt(e.cut.need)}개 필요${e.cut.ids ? ` <button class="link neckHand" data-k="${e.cut.ids.join(',')}">→ '노드 + 손채집'으로 다시 계산</button>` : ''}`
+        ? `<b>${esc(e.cut.label)}</b> — ${e.cut.cap_hit === false ? `노드는 더 있지만 공헌도에 비해 비쌈 (지금 하루 ${fmt(e.cut.need)}개, 노드 최대 약 ${fmt(e.cut.per_day)}개)` : `노드를 다 돌려도 하루 최대 약 ${fmt(e.cut.per_day)}개 · 줄인 수량 기준 하루 ${fmt(e.cut.need)}개 필요`}${e.cut.ids ? ` <button class="link neckHand" data-k="${e.cut.ids.join(',')}">→ '노드 + 손채집'으로 다시 계산</button>` : ''}`
         : '재료 노드는 남아 있지만 <b>공헌도 예산</b>이 모자람'}</p>`).join('')}
       <p class="hint" style="margin:6px 0 0">입력 수량대로 만들려면 그 항목의 기간을 늘리거나, 병목 재료를 '노드 + 손채집'으로 바꾸세요.</p></div>` : ''}
     ${r.auto_found && r.auto_found.length ? `<div class="panel" style="margin-top:12px;border-color:var(--accent)">코덱스 아이템 설명에서 조합식을 자동으로 찾았습니다: <b>${esc(r.auto_found.join(', '))}</b><p class="hint">게임과 다르면 설정의 '조합식 직접 추가'에서 고칠 수 있습니다.</p></div>` : ''}

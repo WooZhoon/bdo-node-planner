@@ -12,3 +12,5 @@ build/
 노드 플래너.pdf
 # 작업 기록 (개인용, 공개 저장소에 올리지 않음 — 사용자 결정 2026-10-22)
 NOTES.md
+# 테스트 케이스 (개인 설정 — scripts/check_cases.py)
+tests/cases/

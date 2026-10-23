@@ -29,11 +29,14 @@ NICE_PENALTY = 10        # '여유' 재료 하나를 완전히 못 채울 때 �
 # 생산량 최대: 항목 수량 +100% 당 보상 (CP 상당) — (배율 구간 끝, 보상). 필수 부족 벌점(1000)보다 작아 부족을 만들며 늘리진 않음
 SCALE_SEGMENTS = [(1.0, 400), (3.0, 150), (float("inf"), 50)]
 SCALE_MAX = 50           # 배율 상한 (×51)
-# 생산량 최대에서 노드로 다 못 채우면 항목 수량을 줄임: 줄이는 벌점 (배율 구간 끝, 벌점). 늘리는 보상보다 커서 줄였다 늘렸다 하지 않고,
-# 많이 줄일수록 커져서 한 항목만 확 줄이기보다 고르게 줄임. 손채집 재료(부족 벌점 1000)로는 줄이지 않음
-SCALE_DOWN = [(0.5, 3000), (0.9, 5000)]
-# 생산량 최대에서 노드로 얻을 수 있는 필수 재료의 부족 벌점 → 부족을 남기기보다 수량을 줄임
-SHORTAGE_PENALTY_MAX = 100000
+# 생산량 최대의 우선순위: 노드로 얻을 수 있는 재료 부족 > 입력 수량 줄이기 > 손채집 재료 부족 > 늘리기 > 여유 > 공헌도
+# 숫자를 감으로 정하지 않고, 윗순위 1단위가 아랫순위를 다 합친 것보다 크게 계산해서 정함 (scripts/check_cases.py 로 확인)
+# 줄이기: (배율 구간 끝, 배수). 벌점 = (모든 항목을 끝까지 늘렸을 때의 보상 합 + 1000) × 배수 →
+# 하나를 조금 줄이고 다른 걸 늘리는 거래가 생기지 않음. 많이 줄일수록 커서 한 항목만 확 줄이기보다 고르게
+SCALE_DOWN = [(0.5, 1.0), (1.0, 1.5)]
+# 노드로 얻을 수 있는 필수 재료 부족 (재료 하나를 완전히 못 채울 때) = 가장 큰 줄이기 벌점 × 이 값 → 부족을 남기기보다 줄임
+# (10 이면 그 재료를 조금만 쓰는 항목은 줄이지 않고 부족을 남겼음 — 그 재료 비중 1% 까지 줄이게 100)
+SHORT_OVER_CUT = 100
 
 
 class Model:
@@ -165,8 +168,6 @@ def solve(d, slots, owned=frozenset(), extra_beds=None, budget=None, towns_per_z
     r = dict(zip(rl, m.vars(len(rl), [0] * len(rl))))
     tot = [sum(v["yields"].get(si, 0) for v in pairs.values()) for si in range(len(slots))]
     grow = goal == "max" and budget is not None
-    s = m.vars(len(slots), [(SHORTAGE_PENALTY_MAX if grow and tot[si] > 0 and si not in hand else SHORTAGE_PENALTY) / q
-                            for si, (_, _, q) in enumerate(slots)], hi=highspy.kHighsInf, integer=False)
     # 생산량 최대: 항목(완성품·재료)마다 배율 T_j. 보상은 구간마다 줄어듦(×2까지 크게, ×4까지 중간, 그 뒤 작게) →
     # 덜 늘어난 항목부터 키워서 비율이 너무 한쪽으로 쏠리지 않고, 한 재료가 막혀도 다른 항목은 계속 늘어남
     base = [q - nice.get(si, 0) for si, (_, _, q) in enumerate(slots)]
@@ -175,11 +176,6 @@ def solve(d, slots, owned=frozenset(), extra_beds=None, budget=None, towns_per_z
     top = [q for _, _, q in slots]  # 칸별로 늘어날 수 있는 최대 필요량 (생산량 계수 자르기용)
     if grow:
         for part in parts:
-            down, lo = [], 0.0
-            for hi_, pen in SCALE_DOWN:
-                down.append(m.vars(1, [pen], hi=hi_ - lo, integer=False)[0])
-                lo = hi_
-            Dn.append(down)
             cap = min([float(SCALE_MAX)] + [max(0.0, (tot[si] - slots[si][2]) / b) for si, b in part.items() if b > 0])
             seg, lo = [], 0.0
             for hi_, rew in SCALE_SEGMENTS:
@@ -192,6 +188,20 @@ def solve(d, slots, owned=frozenset(), extra_beds=None, budget=None, towns_per_z
             caps.append(cap)
             for si, b in part.items():
                 top[si] += b * cap
+        # 줄이기 벌점: 늘리기 보상을 다 합친 것보다 크게
+        g_max = sum(rew * seg_len[t_] for seg in T for t_, (_, rew) in zip(seg, SCALE_SEGMENTS))
+        down_pen = [(hi_, (g_max + 1000) * k) for hi_, k in SCALE_DOWN]
+        for part in parts:
+            down, lo = [], 0.0
+            for hi_, pen in down_pen:
+                down.append(m.vars(1, [pen], hi=hi_ - lo, integer=False)[0])
+                lo = hi_
+            Dn.append(down)
+    # 부족분. 생산량 최대에서 노드로 얻을 수 있는 필수 재료는 줄이기보다 훨씬 큰 벌점 (손채집 재료·노드가 없는 재료는 그대로:
+    # 피할 수 없는 부족에 큰 벌점을 주면 목적값만 커져 상대 갭 2% 가 공헌도엔 너무 느슨해짐)
+    strong = SHORT_OVER_CUT * down_pen[-1][1] if grow else SHORTAGE_PENALTY
+    s = m.vars(len(slots), [(strong if grow and tot[si] > 0 and si not in hand else SHORTAGE_PENALTY) / q
+                            for si, (_, _, q) in enumerate(slots)], hi=highspy.kHighsInf, integer=False)
     # 여유 부족분: 칸의 여유 수량까지만, 벌점 작음 → 부족은 여유 몫부터 생김
     sn = {si: m.vars(1, [NICE_PENALTY / q], hi=float(nice[si]), integer=False)[0]
           for si, (_, _, q) in enumerate(slots) if nice.get(si)}
@@ -222,8 +232,8 @@ def solve(d, slots, owned=frozenset(), extra_beds=None, budget=None, towns_per_z
         m.row(q - st[si], inf, [(a[p], min(v["yields"][si], max(0.0, top[si] - st[si]))) for p, v in pairs.items() if si in v["yields"]] + [(s[si], 1)]
               + ([(sn[si], 1)] if si in sn else [])
               + [(t_, -part[si]) for part, seg in zip(parts, T) if si in part for t_ in seg]
-              # 손채집 칸은 줄여도 필요량이 안 줄어드는 것으로 → 손채집 부족을 덜려고 수량을 줄이지 않음 (손채집 칸이 여럿이면 줄이는 벌점을 넘었음)
-              + [(d_, part[si]) for part, down in zip(parts, Dn) if si in part and si not in hand for d_ in down])
+              # 손채집 칸·노드가 없는 칸은 줄여도 필요량이 안 줄어드는 것으로 → 그 부족을 덜려고 수량을 줄이지 않음
+              + [(d_, part[si]) for part, down in zip(parts, Dn) if si in part and si not in hand and tot[si] > 0 for d_ in down])
     # 노드당 일꾼 1명, 노드·마을 투자 필요
     by_zone = defaultdict(list)
     for (zk, tk) in pl:

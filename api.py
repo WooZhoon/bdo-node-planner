@@ -125,22 +125,25 @@ def bottleneck_days(unit_need, qty, days, src, kinds, body=None):
     return days, None
 
 
-def cut_reason(part, slots, cut, stock, kinds, body):
-    """생산량 최대에서 수량을 줄인 항목의 병목: 그 항목 재료 중 노드 최대 생산량을 가장 많이 쓰는 칸
-    (줄인 뒤 하루 필요량 − 보유분 하루 몫) ÷ 노드 최대. 다들 여유가 있으면 공헌도 예산이 모자란 것"""
+def cut_reason(part, slots, cut, stock, kinds, body, got):
+    """생산량 최대에서 수량을 줄인 항목의 병목: 그 항목 재료 중 계획에서 꽉 찬 칸(생산 ≈ 필요) 가운데 노드 최대를 가장 많이 쓰는 칸.
+    use = (줄인 뒤 하루 필요량 − 보유분 하루 몫) ÷ 노드 최대(공헌도 무시한 낙관값). use 가 작으면 남은 노드가 비싼 것.
+    꽉 찬 칸이 없으면 공헌도 예산이 모자란 것"""
     best = None
     for si in part:
         label, accept, q = slots[si]
-        if is_hand(body, accept):
+        need = max(0.0, q - cut[si])
+        if is_hand(body, accept) or got[si] > need * 1.02 + 1e-6:
             continue
         cap = max_daily(tuple(accept), kinds)
-        need = max(0.0, q - cut[si] - stock.get(si, 0))
-        use = need / cap if cap > 0 else float("inf")
+        use = max(0.0, need - stock.get(si, 0)) / cap if cap > 0 else float("inf")
         if not best or use > best["use"]:
-            best = {"label": label, "per_day": cap, "need": need, "use": use, "ids": list(accept)}
-    if not best or best["use"] < BOTTLENECK_SLACK * 0.8:
+            best = {"label": label, "per_day": cap, "need": max(0.0, need - stock.get(si, 0)), "use": use, "ids": list(accept)}
+    if not best:
         return {"label": None}  # 공헌도 예산
     best["use"] = min(best["use"], 9.99)
+    # 노드 최대까지 거의 다 씀 → 노드가 바닥. 아니면 남은 노드가 공헌도에 비해 비쌈
+    best["cap_hit"] = best["use"] >= BOTTLENECK_SLACK * 0.8
     return best
 
 
@@ -431,8 +434,10 @@ def _plan(body):
     cut = res.get("cut") or [0.0] * len(slots)
     for (ei, part), sc in zip(grow, res["scales"]):
         expansion[ei]["scale"] = sc
+        expansion[ei]["uses"] = [slots[si][0] for si in part]  # 이 항목이 쓰는 재료 칸 (늘리거나 줄일 때 같이 움직임)
         if sc < 0.995:
-            expansion[ei]["cut"] = cut_reason(part, slots, cut, stock, kinds, body)
+            expansion[ei]["cut"] = cut_reason(part, slots, cut, stock, kinds, body,
+                                                [g_ + stock.get(si, 0) for si, g_ in enumerate(res["got"])])
     g = D["graph"]
     # 창고용 집은 계획에서 안 써도 전부 산다는 뜻 → 최적화가 안 고른 것도 표에 넣음 (효율 기준 집 = 창고, 선행만 걸린 집 = 선행)
     listed = {h["key"] for h in res["houses"]}
