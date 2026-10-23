@@ -222,7 +222,8 @@ def solve(d, slots, owned=frozenset(), extra_beds=None, budget=None, towns_per_z
         m.row(q - st[si], inf, [(a[p], min(v["yields"][si], max(0.0, top[si] - st[si]))) for p, v in pairs.items() if si in v["yields"]] + [(s[si], 1)]
               + ([(sn[si], 1)] if si in sn else [])
               + [(t_, -part[si]) for part, seg in zip(parts, T) if si in part for t_ in seg]
-              + [(d_, part[si]) for part, down in zip(parts, Dn) if si in part for d_ in down])
+              # 손채집 칸은 줄여도 필요량이 안 줄어드는 것으로 → 손채집 부족을 덜려고 수량을 줄이지 않음 (손채집 칸이 여럿이면 줄이는 벌점을 넘었음)
+              + [(d_, part[si]) for part, down in zip(parts, Dn) if si in part and si not in hand for d_ in down])
     # 노드당 일꾼 1명, 노드·마을 투자 필요
     by_zone = defaultdict(list)
     for (zk, tk) in pl:
