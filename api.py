@@ -61,7 +61,7 @@ def meta():
 
 
 _max_daily = {}
-BOTTLENECK_SLACK = 0.95
+BOTTLENECK_SLACK = 0.75  # 실제 배치는 노드별 최대(일꾼 종류를 그 재료 기준으로 고른 값)의 77~86% (10/23 측정)
 STOCK_DAYS = 180  # 보유 재료를 다 쓰는 기간 기본값 (사용자: 약 6개월)
 
 
@@ -87,23 +87,38 @@ def max_daily(accept, kinds):
     return _max_daily[key]
 
 
-def bottleneck_days(unit_need, qty, days, src, kinds):
+def stock_daily(body, accept):
+    """보유 재료 중 이 칸(허용 아이템)에 들어가는 것의 하루 몫 = 보유 ÷ 소진 기간"""
+    days = max(1, int(body.get("stock_days") or STOCK_DAYS))
+    return sum(int(v) for k, v in (body.get("stock") or {}).items()
+               if int(v or 0) > 0 and {int(i) for i in str(k).split(",")} <= set(accept)) / days
+
+
+def is_hand(body, accept):
+    """'모자란 만큼 직접 채집'으로 정한 재료인지 (body.hand = {아이템 ID 쉼표: true}).
+    노드는 그대로 최대한 잡되, 기간을 늘리지 않고 모자란 양은 사람이 채움"""
+    return any(v and {int(i) for i in str(k).split(",")} <= set(accept) for k, v in (body.get("hand") or {}).items())
+
+
+def bottleneck_days(unit_need, qty, days, src, kinds, body=None):
     """1개(1회) 기준 필요량으로 병목 재료를 찾아, 원하는 속도가 노드로 낼 수 있는 최대 속도보다 빠르면 기간을 늘림.
-    반환: (실제 기간, 병목 정보 또는 None)"""
+    보유 재료의 하루 몫도 속도에 더함. 반환: (실제 기간, 병목 정보 또는 None)"""
     slots, _ = plan.make_slots(D, unit_need, src)
     worst = None
     for label, accept, q1 in slots:
-        cap = max_daily(tuple(accept), kinds)
+        if body and is_hand(body, accept):  # 모자란 건 사람이 채움 → 기간을 늘리는 이유가 아님
+            continue
+        cap = max_daily(tuple(accept), kinds) + (stock_daily(body, accept) if body else 0)
         if q1 > 0 and cap > 0:
-            # 이 재료로 하루 최대 몇 개(회) 만들 수 있나. 실제 배치(마을·일꾼 후보 제한)가 최대치보다 조금 느릴 수 있어 5% 여유
+            # 이 재료로 하루 최대 몇 개(회) 만들 수 있나. 실제 배치는 일꾼을 노드의 다른 재료까지 보고 골라 최대치보다 느림 → 25% 여유
             rate = cap * BOTTLENECK_SLACK / q1
             if not worst or rate < worst[0]:
-                worst = (rate, label, cap, q1)
+                worst = (rate, label, cap, q1, accept)
     # 결정류처럼 '하루에 1개도 못 만드는' 경우에만 기간을 늘림. 달걀처럼 조금 모자란 건 기간 대신 부족으로 보여줌
     if worst and worst[0] < 1 and qty / days > worst[0]:
-        rate, label, cap, q1 = worst
+        rate, label, cap, q1, accept = worst
         need_days = qty / rate
-        return need_days, {"label": label, "per_day": cap, "per_unit": q1, "days": need_days}
+        return need_days, {"label": label, "per_day": cap, "per_unit": q1, "days": need_days, "ids": list(accept)}
     return days, None
 
 
@@ -120,7 +135,7 @@ def expand_request(body, src):
     def add(entry, one, qty, unit):
         """기간으로 나눠 하루 몫. 병목 재료 속도보다 빠르면 기간을 자동으로 늘림"""
         days = max(1, int(entry.get("days") or default_days))
-        days, neck = bottleneck_days(unit, qty, days, src, kinds)
+        days, neck = bottleneck_days(unit, qty, days, src, kinds, body)
         target = nice if entry.get("priority") == "nice" else must
         for k, v in one.items():
             target[k] += v / days
@@ -286,7 +301,7 @@ def _expand(body):
 def expand_api(body):
     """계산 전에 노드로 모을 재료 목록 (보유 개수 입력용). key = 보유 입력 키(아이템 ID 쉼표), daily = 하루 필요량"""
     src, _, _, _, _, slots, others, found = _expand(body)
-    return {"slots": [{"key": ",".join(map(str, a)), "label": l, "daily": q,
+    return {"slots": [{"key": ",".join(map(str, a)), "label": l, "daily": q, "hand": is_hand(body, a),
                        "items": [item_name(i) for i in a if i in plan.node_items(D)][:8]} for l, a, q in slots],
             "others": [{"label": l, "qty": q, "reason": plan.other_reason(D, a, src)} for l, q, a in others],
             "auto_found": found}
@@ -317,9 +332,8 @@ def _plan(body):
     budget = body.get("budget")
     # 보유 재료: {아이템 ID 들(쉼표): 개수} → 소진 기간(기본 180일)에 나눠 하루 몫만큼 노드 없이 채움
     stock_days = max(1, int(body.get("stock_days") or STOCK_DAYS))
-    stock_n = [sum(int(v) for k, v in (body.get("stock") or {}).items()
-                   if int(v or 0) > 0 and {int(i) for i in str(k).split(",")} <= set(a)) for _, a, _ in slots]
-    stock = {si: n / stock_days for si, n in enumerate(stock_n) if n}
+    stock = {si: v for si, v in enumerate(stock_daily(body, a) for _, a, _ in slots) if v}
+    stock_n = [round(stock.get(si, 0) * stock_days) for si in range(len(slots))]
     res = optimize.solve(D, slots, owned=owned, extra_beds=beds,
                          budget=int(budget) if budget not in (None, "") else None,
                          time_limit=float(body.get("time", 60)),
@@ -352,7 +366,7 @@ def _plan(body):
         "node_cp": res["node_cp"], "house_cp": res["house_cp"],
         # got = 노드 생산 + 보유분 하루 몫
         "slots": [{"label": l, "qty": q, "got": got + stock.get(si, 0), "ids": list(a), "mode": "node", "nice": nice_slots.get(si, 0),
-                   "stock": stock_n[si], "stock_daily": stock.get(si, 0),
+                   "stock": stock_n[si], "stock_daily": stock.get(si, 0), "hand": is_hand(body, a),
                    "items": [item_name(i) for i in a if i in plan.node_items(D)][:8]}
                   for si, ((l, a, q), got) in enumerate(zip(slots, res["got"]))],
         "chosen": [{
